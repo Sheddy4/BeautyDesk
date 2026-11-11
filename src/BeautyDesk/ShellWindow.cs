@@ -8,33 +8,37 @@ using Microsoft.Web.WebView2.Wpf;
 
 namespace BeautyDesk;
 
-internal enum ShellRole { Bar, Dock }
+/// <summary>Bar — верхняя панель, Dock — док, Island — «остров» с музыкой поверх панели, Menu — выпадающее меню.</summary>
+internal enum ShellRole { Bar, Dock, Island, Menu }
 
 /// <summary>
-/// Одно окно оболочки на одном экране: верхняя панель или док.
-/// Само окно пустое и прозрачное, всё видимое рисует веб-страница внутри WebView2.
-/// Панель дополнительно резервирует место вверху экрана, чтобы развёрнутые окна под неё не заезжали.
+/// Одно окно оболочки. Само окно пустое и прозрачное, всё видимое рисует веб-страница внутри WebView2.
+/// Где окну стоять, решает <see cref="DesktopHost"/>; панель дополнительно резервирует место
+/// вверху экрана, чтобы развёрнутые окна под неё не заезжали.
 /// </summary>
 internal sealed class ShellWindow : Window
 {
-    private const double DockBottomMargin = 8;
     private static readonly uint AppBarCallback = Native.RegisterWindowMessage("BeautyDesk.AppBar");
     private static readonly uint TaskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
 
     private readonly WebView2 _web = new() { DefaultBackgroundColor = System.Drawing.Color.Transparent };
     private IntPtr _hwnd;
     private bool _appBarRegistered;
-    private Theme _theme;
+    private Native.RECT _bounds;
 
     public ShellRole Role { get; }
-    public MonitorInfo Monitor { get; }
-    public event Action<ShellWindow, JsonElement>? MessageReceived;
+    /// <summary>Экран, на котором окно сейчас стоит. Меню одно на все экраны и переезжает между ними.</summary>
+    public MonitorInfo Monitor { get; set; }
+    /// <summary>Положение окна на экране в физических пикселях.</summary>
+    public Native.RECT Bounds => _bounds;
+    /// <summary>Для «острова»: развёрнут ли он сейчас.</summary>
+    public bool Expanded { get; set; }
 
-    public ShellWindow(ShellRole role, MonitorInfo monitor, Theme theme)
+    public event Action<ShellWindow, JsonElement>? MessageReceived;
+    public ShellWindow(ShellRole role, MonitorInfo monitor)
     {
         Role = role;
         Monitor = monitor;
-        _theme = theme;
 
         Title = $"BeautyDesk {role}";
         WindowStyle = WindowStyle.None;
@@ -47,21 +51,30 @@ internal sealed class ShellWindow : Window
         Content = _web;
     }
 
-    public async Task InitAsync(CoreWebView2Environment environment)
+    public async Task InitAsync(CoreWebView2Environment environment, Native.RECT bounds, bool startHidden = false)
     {
         _hwnd = new WindowInteropHelper(this).EnsureHandle();
         var source = HwndSource.FromHwnd(_hwnd)!;
         source.CompositionTarget.BackgroundColor = Colors.Transparent;
         source.AddHook(WndProc);
 
-        // Окно не попадает в Alt+Tab и не забирает фокус у программы, с которой работает человек.
-        var ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE).ToInt64();
+        // Окно не попадает в Alt+Tab и само не просит фокус у программы, с которой работает человек.
+        long ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE).ToInt64();
         Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(ex | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE));
 
         MakeTransparent();
-        Place();
-        Show();
-        Place(); // WPF при первом показе может пересчитать размер — ставим окончательно
+        _bounds = bounds;
+        if (!startHidden)
+        {
+            Show();
+            SetBounds(bounds);
+        }
+        else
+        {
+            // WebView2 создаётся только в показанном окне: показываем точкой за краем экрана и потом прячем.
+            Show();
+            Native.SetWindowPos(_hwnd, IntPtr.Zero, -32000, -32000, 1, 1, Native.SWP_NOACTIVATE | Native.SWP_NOZORDER);
+        }
 
         await _web.EnsureCoreWebView2Async(environment);
         var core = _web.CoreWebView2;
@@ -82,23 +95,37 @@ internal sealed class ShellWindow : Window
             MessageReceived?.Invoke(this, doc.RootElement.Clone());
         };
         core.Navigate($"https://app.beautydesk.example/index.html?role={Role.ToString().ToLowerInvariant()}");
+
+        if (startHidden) Hide();
     }
 
     public void Post(string json) => _web.CoreWebView2?.PostWebMessageAsJson(json);
 
-    public void ApplyTheme(Theme theme)
+    /// <summary>Ставит окно в указанное место экрана (физические пиксели).</summary>
+    public void SetBounds(Native.RECT bounds)
     {
-        _theme = theme;
-        Place();
+        _bounds = bounds;
+        if (!IsVisible) return; // спрятанное окно встанет на место при показе
+        if (Role == ShellRole.Bar) ReserveTopEdge(ref _bounds);
+        Native.SetWindowPos(_hwnd, IntPtr.Zero, _bounds.Left, _bounds.Top, _bounds.Width, _bounds.Height,
+            Native.SWP_NOACTIVATE | Native.SWP_NOZORDER);
     }
 
-    /// <summary>Прячет окно, пока на этом экране открыто полноэкранное приложение.</summary>
-    public void SetSuppressed(bool suppressed)
+    /// <summary>Показывает или прячет окно, не трогая фокус.</summary>
+    public void SetShown(bool shown)
     {
-        if (suppressed == !IsVisible) return;
-        if (suppressed) Hide();
-        else { Show(); Place(); }
+        if (shown == IsVisible) return;
+        if (shown)
+        {
+            Show();
+            SetBounds(_bounds);
+        }
+        else Hide();
     }
+
+    /// <summary>Поднимает окно над остальными окнами оболочки.</summary>
+    public void Raise() =>
+        Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
 
     protected override void OnClosed(EventArgs e)
     {
@@ -107,29 +134,7 @@ internal sealed class ShellWindow : Window
         base.OnClosed(e);
     }
 
-    // ---------- положение на экране ----------
-
-    private int Px(double dip) => (int)Math.Round(dip * Monitor.Scale);
-
-    private void Place()
-    {
-        var m = Monitor.Bounds;
-        if (Role == ShellRole.Bar)
-        {
-            var rect = new Native.RECT { Left = m.Left, Top = m.Top, Right = m.Right, Bottom = m.Top + Px(_theme.BarHeight) };
-            ReserveTopEdge(ref rect);
-            Move(rect);
-        }
-        else
-        {
-            int w = Math.Min(Px(_theme.DockWidth), m.Width), h = Px(_theme.DockHeight);
-            int left = m.Left + (m.Width - w) / 2, top = m.Bottom - h - Px(DockBottomMargin);
-            Move(new Native.RECT { Left = left, Top = top, Right = left + w, Bottom = top + h });
-        }
-    }
-
-    private void Move(Native.RECT r) =>
-        Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, r.Left, r.Top, r.Width, r.Height, Native.SWP_NOACTIVATE);
+    // ---------- место вверху экрана ----------
 
     private void ReserveTopEdge(ref Native.RECT rect)
     {
@@ -166,13 +171,13 @@ internal sealed class ShellWindow : Window
         if (Role != ShellRole.Bar) return IntPtr.Zero;
         if ((uint)msg == AppBarCallback && wParam.ToInt32() == Native.ABN_POSCHANGED)
         {
-            Place();
+            SetBounds(_bounds);
         }
         else if ((uint)msg == TaskbarCreated)
         {
             // Проводник перезапустился и забыл про наше место вверху экрана — занимаем заново.
             _appBarRegistered = false;
-            Place();
+            SetBounds(_bounds);
         }
         return IntPtr.Zero;
     }

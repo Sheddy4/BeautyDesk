@@ -1,7 +1,19 @@
 {
-  "bar.monitor": "Display",
-  "bar.theme": "Theme",
-  "bar.language": "Language",
-  "bar.exit": "Quit",
-  "dock.placeholder": "Dock"
+  "bar.desktop": "Desktop",
+  "bar.quick": "Quick settings",
+  "bar.notifications": "Notifications",
+  "bar.noSound": "No audio device",
+  "bar.offline": "Not connected",
+  "dock.placeholder": "Dock",
+  "menu.theme": "Theme",
+  "menu.language": "Language",
+  "menu.lock": "Lock",
+  "menu.sleep": "Sleep",
+  "menu.restart": "Restart",
+  "menu.shutdown": "Shut down",
+  "menu.quit": "Quit BeautyDesk",
+  "menu.confirm": "Click again to confirm",
+  "media.previous": "Previous track",
+  "media.toggle": "Play / pause",
+  "media.next": "Next track"
 }

@@ -1,21 +1,29 @@
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using BeautyDesk.Services;
+using ManagedShell;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 
 namespace BeautyDesk;
 
 /// <summary>
-/// Дирижёр приложения: держит по панели и доку на каждом экране, раздаёт им тему и язык,
-/// следит за полноэкранными программами и возвращает Windows в исходный вид при выходе.
+/// Дирижёр приложения: держит окна оболочки на каждом экране, раздаёт страницам тему, язык и данные,
+/// выполняет их просьбы, следит за полноэкранными программами и возвращает Windows в исходный вид при выходе.
 /// </summary>
 internal sealed class DesktopHost
 {
     private const int ExitHotKeyId = 1;
     private const uint VK_Q = 0x51;
+
+    // Размеры в единицах, не зависящих от масштаба экрана (как px в CSS).
+    private const double DockBottomMargin = 8;
+    private const double IslandWidth = 260, IslandExpandedWidth = 380, IslandExpandedHeight = 150;
+    private const double MenuWidth = 240, MenuItemHeight = 30, MenuSeparatorHeight = 9, MenuPadding = 14, MenuGap = 4;
 
     // Окна самой Windows, которые занимают весь экран, но полноэкранным приложением не являются.
     private static readonly HashSet<string> NotFullscreenClasses =
@@ -24,13 +32,26 @@ internal sealed class DesktopHost
         "Windows.UI.Core.CoreWindow", "MultitaskingViewFrame", "ForegroundStaging"
     ];
 
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private sealed record MenuItem(string Id, string Label = "", bool Separator = false, bool Confirm = false);
+
     private readonly Settings _settings = Settings.Load();
     private readonly List<ShellWindow> _windows = [];
+    private readonly Dictionary<string, string> _topics = [];
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly DispatcherTimer _displayChanged = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly SystemInfo _system = new();
+    private readonly MediaInfo _media = new();
     private IReadOnlyList<Theme> _themes = Themes.LoadAll();
     private CoreWebView2Environment? _environment;
-    private bool _paused;
+    private ShellManager? _shell;
+    private TrayIcons? _tray;
+    private ShellWindow? _menu;
+    private IntPtr _fullscreenMonitor;
+    private Native.RECT _menuAnchor;
+    private Native.LowLevelMouseProc? _mouseProc;
+    private IntPtr _mouseHook;
     private bool _exiting;
 
     public async Task StartAsync()
@@ -41,14 +62,30 @@ internal sealed class DesktopHost
         ShellState.Hide(!_settings.ShowDesktopIcons);
         ApplyWallpaper();
 
+        // Из ManagedShell нужен только трей; список окон понадобится доку.
+        var config = ShellManager.DefaultShellConfig;
+        config.EnableTasksService = false;
+        _shell = new ShellManager(config);
+        _tray = new TrayIcons(_shell.NotificationArea);
+        _tray.Changed += () => Publish("tray", _tray.Snapshot());
+        _system.Changed += () => Publish("sys", _system.Current);
+        _media.Changed += () => { Publish("media", _media.Current); UpdateVisibility(); };
+
         _environment = await CoreWebView2Environment.CreateAsync(null, AppPaths.WebViewData);
         await BuildWindowsAsync();
+        await _media.StartAsync();
+
+        Publish("tray", _tray.Snapshot());
+        Publish("media", _media.Current);
+        _system.Refresh();
+        Publish("sys", _system.Current);
+        UpdateVisibility();
 
         _timer.Tick += (_, _) => Tick();
         _timer.Start();
 
         // Смена разрешения или подключение экрана присылает несколько событий подряд — ждём, пока утихнет.
-        _displayChanged.Tick += async (_, _) => { _displayChanged.Stop(); await BuildWindowsAsync(); };
+        _displayChanged.Tick += async (_, _) => { _displayChanged.Stop(); await BuildWindowsAsync(); UpdateVisibility(); };
         SystemEvents.DisplaySettingsChanged += (_, _) => { _displayChanged.Stop(); _displayChanged.Start(); };
 
         Native.RegisterHotKey(IntPtr.Zero, ExitHotKeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, VK_Q);
@@ -63,45 +100,94 @@ internal sealed class DesktopHost
         _exiting = true;
         _timer.Stop();
         Native.UnregisterHotKey(IntPtr.Zero, ExitHotKeyId);
+        CloseMenu();
         foreach (var w in _windows) w.Close();
         _windows.Clear();
+        _menu?.Close();
+        _system.Dispose();
+        _shell?.Dispose();
         ShellState.Restore();
         Application.Current.Shutdown();
     }
 
     private Theme CurrentTheme => _themes.FirstOrDefault(t => t.Id == _settings.Theme) ?? _themes[0];
 
-    // ---------- окна ----------
+    // ---------- окна и их места ----------
 
     private async Task BuildWindowsAsync()
     {
+        CloseMenu();
         foreach (var w in _windows) w.Close();
         _windows.Clear();
+        _menu?.Close();
 
-        foreach (var monitor in Monitors.All())
-        foreach (var role in new[] { ShellRole.Bar, ShellRole.Dock })
+        var monitors = Monitors.All();
+        foreach (var monitor in monitors)
+        foreach (var role in new[] { ShellRole.Bar, ShellRole.Dock, ShellRole.Island })
         {
-            var window = new ShellWindow(role, monitor, CurrentTheme);
+            var window = new ShellWindow(role, monitor);
             window.MessageReceived += OnMessage;
             _windows.Add(window);
-            await window.InitAsync(_environment!);
+            // «Остров» появляется, только когда что-то играет.
+            await window.InitAsync(_environment!, BoundsFor(window), startHidden: role == ShellRole.Island);
+        }
+
+        // Меню одно на все экраны: создаётся заранее, чтобы открываться без задержки.
+        _menu = new ShellWindow(ShellRole.Menu, monitors[0]);
+        _menu.MessageReceived += OnMessage;
+        await _menu.InitAsync(_environment!, default, startHidden: true);
+    }
+
+    private static int Px(MonitorInfo monitor, double units) => (int)Math.Round(units * monitor.Scale);
+
+    private Native.RECT BoundsFor(ShellWindow window)
+    {
+        var monitor = window.Monitor;
+        var m = monitor.Bounds;
+        var theme = CurrentTheme;
+        switch (window.Role)
+        {
+            case ShellRole.Bar:
+                return new Native.RECT { Left = m.Left, Top = m.Top, Right = m.Right, Bottom = m.Top + Px(monitor, theme.BarHeight) };
+            case ShellRole.Dock:
+            {
+                int w = Math.Min(Px(monitor, theme.DockWidth), m.Width), h = Px(monitor, theme.DockHeight);
+                int left = m.Left + (m.Width - w) / 2, top = m.Bottom - h - Px(monitor, DockBottomMargin);
+                return new Native.RECT { Left = left, Top = top, Right = left + w, Bottom = top + h };
+            }
+            case ShellRole.Island:
+            {
+                int w = Px(monitor, window.Expanded ? IslandExpandedWidth : IslandWidth);
+                int h = Px(monitor, window.Expanded ? IslandExpandedHeight : theme.BarHeight);
+                int left = m.Left + (m.Width - w) / 2;
+                return new Native.RECT { Left = left, Top = m.Top, Right = left + w, Bottom = m.Top + h };
+            }
+            default:
+                return window.Bounds;
         }
     }
 
     private void Tick()
     {
         ShellState.KeepHidden(!_settings.ShowDesktopIcons);
+        _system.Refresh();
 
         var fullscreen = FullscreenMonitor();
-        foreach (var w in _windows)
-            w.SetSuppressed(w.Monitor.Handle == fullscreen);
+        if (fullscreen == _fullscreenMonitor) return;
+        _fullscreenMonitor = fullscreen;
+        UpdateVisibility();
+        Broadcast(); // страницы останавливают анимации, пока открыто полноэкранное приложение
+    }
 
-        bool paused = fullscreen != IntPtr.Zero;
-        if (paused != _paused)
+    private void UpdateVisibility()
+    {
+        foreach (var w in _windows)
         {
-            _paused = paused;
-            Broadcast();
+            bool shown = w.Monitor.Handle != _fullscreenMonitor && (w.Role != ShellRole.Island || _media.Current is not null);
+            w.SetShown(shown);
         }
+        // «Остров» лежит поверх панели, а не под ней.
+        foreach (var w in _windows.Where(w => w.Role == ShellRole.Island && w.IsVisible)) w.Raise();
     }
 
     /// <summary>Экран, который целиком занят активным приложением (игра, видео на весь экран), или Zero.</summary>
@@ -121,27 +207,234 @@ internal sealed class DesktopHost
         return r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom ? handle : IntPtr.Zero;
     }
 
-    // ---------- общение со страницами ----------
+    // ---------- данные для страниц ----------
+
+    /// <summary>Какое окно читает какую тему данных.</summary>
+    private static ShellRole RoleFor(string topic) => topic switch
+    {
+        "media" => ShellRole.Island,
+        "menu" => ShellRole.Menu,
+        _ => ShellRole.Bar
+    };
+
+    private IEnumerable<ShellWindow> AllWindows => _menu is null ? _windows : _windows.Append(_menu);
+
+    /// <summary>Рассылает данные страницам; повтор тех же данных не отправляется.</summary>
+    private void Publish(string topic, object? data)
+    {
+        var json = JsonSerializer.Serialize(new { type = topic, data }, Json);
+        if (_topics.TryGetValue(topic, out var last) && last == json) return;
+        _topics[topic] = json;
+        foreach (var w in AllWindows.Where(w => w.Role == RoleFor(topic))) w.Post(json);
+    }
+
+    private void Broadcast()
+    {
+        foreach (var w in AllWindows) w.Post(StateJson(w));
+    }
+
+    private string StateJson(ShellWindow window)
+    {
+        var theme = CurrentTheme;
+        return JsonSerializer.Serialize(new
+        {
+            type = "state",
+            monitor = window.Monitor.Index + 1,
+            // Метка времени в адресе заставляет страницу перечитать стили после правок в папке темы.
+            theme = new { id = theme.Id, css = $"{theme.CssUrl}?v={File.GetLastWriteTimeUtc(Path.Combine(theme.Dir, "theme.css")).Ticks}" },
+            language = _settings.Language,
+            strings = Strings(_settings.Language),
+            paused = _fullscreenMonitor != IntPtr.Zero
+        }, Json);
+    }
+
+    // ---------- просьбы страниц ----------
 
     private void OnMessage(ShellWindow window, JsonElement message)
     {
-        var type = message.TryGetProperty("type", out var t) ? t.GetString() : null;
-        switch (type)
+        switch (Text(message, "type"))
         {
             case "ready":
                 window.Post(StateJson(window));
+                foreach (var (topic, json) in _topics)
+                    if (RoleFor(topic) == window.Role) window.Post(json);
                 break;
-            case "setTheme" when message.TryGetProperty("id", out var id):
-                SetTheme(id.GetString());
+
+            case "tray" when message.TryGetProperty("rect", out var rect):
+                _tray?.Mouse(Number(message, "id"), Text(message, "kind") ?? "", Text(message, "button"), ToScreen(window, rect));
                 break;
-            case "setLanguage" when message.TryGetProperty("language", out var lang):
-                SetLanguage(lang.GetString());
+
+            case "volumeStep":
+                _system.StepVolume(Number(message, "delta"));
                 break;
-            case "exit":
-                Exit();
+
+            case "open":
+                // Штатные панели Windows: быстрые настройки (Wi-Fi, звук, трансляция на экран) и центр уведомлений.
+                OpenUri(Text(message, "target") == "notifications" ? "ms-actioncenter:" : "ms-actioncenter:controlcenter/&showFooter=true");
+                break;
+
+            case "media":
+                switch (Text(message, "action"))
+                {
+                    case "toggle": _media.Toggle(); break;
+                    case "next": _media.Next(); break;
+                    case "previous": _media.Previous(); break;
+                    case "seek" when message.TryGetProperty("position", out var p) && p.TryGetDouble(out var seconds): _media.Seek(seconds); break;
+                }
+                break;
+
+            case "islandExpand" when window.Role == ShellRole.Island && message.TryGetProperty("value", out var value):
+                window.Expanded = value.ValueKind == JsonValueKind.True;
+                window.SetBounds(BoundsFor(window));
+                break;
+
+            case "openMenu" when message.TryGetProperty("rect", out var anchor):
+                ToggleSystemMenu(window, ToScreen(window, anchor));
+                break;
+
+            case "menuAction":
+                RunMenuAction(Text(message, "id"));
                 break;
         }
     }
+
+    private static string? Text(JsonElement message, string name) =>
+        message.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static int Number(JsonElement message, string name) =>
+        message.TryGetProperty(name, out var v) && v.TryGetDouble(out var d) ? (int)Math.Round(d) : 0;
+
+    /// <summary>Переводит прямоугольник из координат страницы в координаты экрана.</summary>
+    private static Native.RECT ToScreen(ShellWindow window, JsonElement rect)
+    {
+        double Value(string name) => rect.TryGetProperty(name, out var v) && v.TryGetDouble(out var d) ? d : 0;
+        var b = window.Bounds;
+        int left = b.Left + Px(window.Monitor, Value("x")), top = b.Top + Px(window.Monitor, Value("y"));
+        return new Native.RECT { Left = left, Top = top, Right = left + Px(window.Monitor, Value("width")), Bottom = top + Px(window.Monitor, Value("height")) };
+    }
+
+    private static void OpenUri(string uri)
+    {
+        try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })?.Dispose(); }
+        catch (Exception e) { Log.Write($"Не открылось {uri}: {e.Message}"); }
+    }
+
+    // ---------- системное меню ----------
+
+    private List<MenuItem> SystemMenuItems()
+    {
+        var s = Strings(_settings.Language);
+        string T(string key) => s.GetValueOrDefault(key, key);
+        return
+        [
+            new("theme", $"{T("menu.theme")}: {CurrentTheme.NameFor(_settings.Language)}"),
+            new("language", $"{T("menu.language")}: {_settings.Language.ToUpperInvariant()}"),
+            new("", Separator: true),
+            new("lock", T("menu.lock")),
+            new("sleep", T("menu.sleep")),
+            new("restart", T("menu.restart"), Confirm: true),
+            new("shutdown", T("menu.shutdown"), Confirm: true),
+            new("", Separator: true),
+            new("quit", T("menu.quit"))
+        ];
+    }
+
+    private void ToggleSystemMenu(ShellWindow from, Native.RECT anchor)
+    {
+        if (_menu is null) return;
+        if (_menu.IsVisible) { CloseMenu(); return; }
+
+        var items = SystemMenuItems();
+        var monitor = from.Monitor;
+        int width = Px(monitor, MenuWidth);
+        int height = Px(monitor, MenuPadding + items.Sum(i => i.Separator ? MenuSeparatorHeight : MenuItemHeight));
+        int left = Math.Clamp(anchor.Left, monitor.Bounds.Left, monitor.Bounds.Right - width);
+        int top = from.Bounds.Bottom + Px(monitor, MenuGap);
+
+        _menuAnchor = anchor;
+        _menu.Monitor = monitor;
+        _menu.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
+        _menu.Post(StateJson(_menu));
+        _topics.Remove("menu"); // меню открывается заново — отправляем пункты, даже если они не изменились
+        Publish("menu", new { items });
+        _menu.SetShown(true);
+        _menu.Raise();
+        WatchOutsideClicks(true);
+    }
+
+    private void CloseMenu()
+    {
+        WatchOutsideClicks(false);
+        _menu?.SetShown(false);
+    }
+
+    /// <summary>
+    /// Пока меню открыто, следим за нажатиями мыши по всему экрану: нажатие мимо меню его закрывает.
+    /// На потерю фокуса полагаться нельзя — окна оболочки фокус не держат.
+    /// </summary>
+    private void WatchOutsideClicks(bool on)
+    {
+        if (on == (_mouseHook != IntPtr.Zero)) return;
+        if (!on)
+        {
+            Native.UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = IntPtr.Zero;
+            return;
+        }
+        _mouseProc = (code, wParam, lParam) =>
+        {
+            int message = wParam.ToInt32();
+            bool pressed = message is Native.WM_LBUTTONDOWN or Native.WM_RBUTTONDOWN or Native.WM_MBUTTONDOWN;
+            if (code >= 0 && pressed && _menu is not null)
+            {
+                var point = System.Runtime.InteropServices.Marshal.PtrToStructure<Native.POINT>(lParam);
+                // Нажатие на саму кнопку меню не считается: его обработает панель и закроет меню сама.
+                if (!Contains(_menu.Bounds, point) && !Contains(_menuAnchor, point))
+                    Application.Current.Dispatcher.BeginInvoke(CloseMenu);
+            }
+            return Native.CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+        };
+        _mouseHook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, _mouseProc, Native.GetModuleHandle(null), 0);
+    }
+
+    private static bool Contains(Native.RECT r, Native.POINT p) =>
+        p.X >= r.Left && p.X < r.Right && p.Y >= r.Top && p.Y < r.Bottom;
+
+    private void RunMenuAction(string? id)
+    {
+        switch (id)
+        {
+            // Тема и язык меняются на месте, меню остаётся открытым с обновлёнными подписями.
+            case "theme":
+                var ids = _themes.Select(t => t.Id).ToList();
+                SetTheme(ids[(ids.IndexOf(CurrentTheme.Id) + 1) % ids.Count]);
+                Publish("menu", new { items = SystemMenuItems() });
+                return;
+            case "language":
+                var languages = Languages();
+                SetLanguage(languages[(languages.IndexOf(_settings.Language) + 1) % languages.Count]);
+                Publish("menu", new { items = SystemMenuItems() });
+                return;
+        }
+
+        CloseMenu();
+        switch (id)
+        {
+            case "lock": Native.LockWorkStation(); break;
+            case "sleep": Native.SetSuspendState(false, false, false); break;
+            case "restart": Shutdown("/r /t 0"); break;
+            case "shutdown": Shutdown("/s /t 0"); break;
+            case "quit": Exit(); break;
+        }
+    }
+
+    private static void Shutdown(string arguments)
+    {
+        try { Process.Start(new ProcessStartInfo("shutdown.exe", arguments) { CreateNoWindow = true, UseShellExecute = false })?.Dispose(); }
+        catch (Exception e) { Log.Write($"Команда завершения работы не выполнена: {e.Message}"); }
+    }
+
+    // ---------- тема, язык, обои ----------
 
     private void SetTheme(string? id)
     {
@@ -149,7 +442,7 @@ internal sealed class DesktopHost
         if (_themes.All(t => t.Id != id)) return;
         _settings.Theme = id!;
         _settings.Save();
-        foreach (var w in _windows) w.ApplyTheme(CurrentTheme);
+        foreach (var w in _windows) w.SetBounds(BoundsFor(w));
         ApplyWallpaper();
         Broadcast();
         Log.Write($"Тема: {id}");
@@ -169,28 +462,6 @@ internal sealed class DesktopHost
         var path = _settings.Wallpaper is { } custom && File.Exists(custom) ? custom : CurrentTheme.WallpaperPath;
         if (path is not null) ShellState.SetWallpaper(path);
         else ShellState.ResetWallpaper();
-    }
-
-    private void Broadcast()
-    {
-        foreach (var w in _windows) w.Post(StateJson(w));
-    }
-
-    private string StateJson(ShellWindow window)
-    {
-        var theme = CurrentTheme;
-        return JsonSerializer.Serialize(new
-        {
-            type = "state",
-            monitor = window.Monitor.Index + 1,
-            // Метка времени в адресе заставляет страницу перечитать стили после правок в папке темы.
-            theme = new { id = theme.Id, css = $"{theme.CssUrl}?v={File.GetLastWriteTimeUtc(Path.Combine(theme.Dir, "theme.css")).Ticks}" },
-            themes = _themes.Select(t => new { id = t.Id, name = t.NameFor(_settings.Language) }),
-            language = _settings.Language,
-            languages = Languages(),
-            strings = Strings(_settings.Language),
-            paused = _paused
-        });
     }
 
     // ---------- переводы ----------

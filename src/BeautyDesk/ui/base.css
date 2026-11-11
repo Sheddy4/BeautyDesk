@@ -8,11 +8,15 @@
   --bd-fg: #f2f2f2;
   --bd-muted: rgba(242, 242, 242, 0.55);
   --bd-accent: #4c9aff;
+  --bd-danger: #ff5f57;
   --bd-surface: rgba(20, 20, 20, 0.8);
   --bd-border: 1px solid rgba(255, 255, 255, 0.1);
   --bd-radius: 10px;
   --bd-control-bg: rgba(255, 255, 255, 0.08);
   --bd-control-radius: 6px;
+  --bd-menu-bg: rgba(24, 24, 24, 0.96);
+  --bd-island-bg: #000;
+  --bd-island-fg: #fff;
 }
 
 * { box-sizing: border-box; }
@@ -28,19 +32,82 @@ html, body {
   color: var(--bd-fg);
 }
 
-.surface {
-  height: 100%;
-  background: var(--bd-surface);
-  display: none;
-  align-items: center;
+[hidden] { display: none !important; }
+.muted { color: var(--bd-muted); }
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  cursor: default;
 }
+
+/* Кнопка без собственного фона: подсвечивается только под курсором. */
+button.plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: calc(100% - 6px);
+  padding: 0 8px;
+  background: transparent;
+  border-radius: var(--bd-control-radius);
+}
+button.plain:hover { background: var(--bd-control-bg); }
+
+/* Каждое окно показывает только свою часть страницы. */
+.surface, #island { display: none; }
+.surface { height: 100%; background: var(--bd-surface); align-items: center; }
+
+/* ---------- верхняя панель ---------- */
 
 html[data-role="bar"] #bar {
   display: flex;
   justify-content: space-between;
-  padding: 0 10px;
+  padding: 0 6px;
   border-bottom: var(--bd-border);
 }
+
+.group { display: flex; align-items: center; gap: 6px; height: 100%; min-width: 0; }
+.brand { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
+
+#tray { display: flex; align-items: center; gap: 2px; height: 100%; }
+.tray-icon {
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border-radius: var(--bd-control-radius);
+  object-fit: contain;
+}
+.tray-icon:hover { background: var(--bd-control-bg); }
+
+#layout { padding: 0 4px; font-weight: 600; }
+#volume, #network, #battery { display: inline-flex; align-items: center; gap: 4px; }
+#clock { white-space: pre; font-variant-numeric: tabular-nums; }
+
+.battery-shell {
+  position: relative;
+  width: 22px;
+  height: 11px;
+  padding: 1px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.9;
+}
+.battery-shell::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: 3px;
+  width: 2px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 0 1px 1px 0;
+}
+.battery-level { display: block; height: 100%; background: currentColor; border-radius: 1px; }
+#battery.charging .battery-level { background: var(--bd-accent); }
+#battery.low .battery-level { background: var(--bd-danger); }
+
+/* ---------- док ---------- */
 
 html[data-role="dock"] #dock {
   display: flex;
@@ -50,29 +117,76 @@ html[data-role="dock"] #dock {
   border-radius: var(--bd-radius);
 }
 
-.group { display: flex; align-items: center; gap: 10px; }
-.brand { font-weight: 600; }
-.muted { color: var(--bd-muted); }
+/* ---------- «остров» ---------- */
 
-button {
-  font: inherit;
-  color: inherit;
-  background: var(--bd-control-bg);
-  border: 0;
+html[data-role="island"] #island {
+  position: absolute;
+  inset: 3px 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 10px;
+  overflow: hidden;
+  background: var(--bd-island-bg);
+  color: var(--bd-island-fg);
+  border-radius: 14px;
+}
+html[data-role="island"] #island.expanded { inset: 3px 6px 6px; padding: 14px; border-radius: 22px; }
+
+.island-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#media-cover { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; flex: none; }
+.media-text { flex: 1; min-width: 0; }
+#media-title, #media-artist { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#media-artist, .island-more { display: none; }
+
+#island.expanded .island-row { gap: 12px; }
+#island.expanded #media-cover { width: 52px; height: 52px; border-radius: 10px; }
+#island.expanded #media-title { font-size: 1.1em; font-weight: 600; }
+#island.expanded #media-artist { display: block; opacity: 0.65; }
+#island.expanded .island-more { display: block; }
+
+/* Три столбика, которые «дышат», пока музыка играет. */
+.media-bars { display: flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
+.media-bars i { width: 2px; height: 30%; background: var(--bd-accent); border-radius: 1px; }
+#island.playing .media-bars i { animation: bd-bars 0.9s ease-in-out infinite; }
+#island.playing .media-bars i:nth-child(2) { animation-delay: 0.2s; }
+#island.playing .media-bars i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bd-bars { 50% { height: 100%; } }
+
+#media-progress { height: 4px; background: rgba(255, 255, 255, 0.2); border-radius: 2px; overflow: hidden; }
+#media-progress-fill { height: 100%; width: 0; background: var(--bd-island-fg); }
+.media-times { display: flex; justify-content: space-between; margin-top: 3px; font-size: 0.8em; opacity: 0.6; font-variant-numeric: tabular-nums; }
+#island.no-timeline #media-progress, #island.no-timeline .media-times { visibility: hidden; }
+.media-controls { display: flex; justify-content: center; gap: 14px; height: 26px; margin-top: -4px; }
+.media-controls button.plain { height: 26px; padding: 0 6px; }
+.media-controls button.plain:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* ---------- меню ---------- */
+
+html[data-role="menu"] #menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 6px;
+  background: var(--bd-menu-bg);
+  border: var(--bd-border);
+  border-radius: min(var(--bd-radius), 12px);
+}
+.menu-item {
+  height: 30px;
+  flex: none;
+  padding: 0 10px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
   border-radius: var(--bd-control-radius);
-  padding: 2px 8px;
-  cursor: default;
 }
-button:hover { background: color-mix(in srgb, var(--bd-control-bg), var(--bd-fg) 12%); }
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--bd-accent);
-  animation: bd-pulse 1.6s ease-in-out infinite;
-}
-@keyframes bd-pulse { 50% { opacity: 0.25; } }
+.menu-item:hover { background: var(--bd-control-bg); }
+.menu-item.armed { color: var(--bd-danger); }
+#menu hr { flex: none; height: 1px; margin: 4px 6px; border: 0; background: currentColor; opacity: 0.15; }
 
 /* Полноэкранное приложение: все анимации стоят. */
 body.paused *, body.paused *::before, body.paused *::after { animation-play-state: paused !important; }

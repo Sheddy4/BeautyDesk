@@ -1,13 +1,43 @@
-// Страница одна на оба окна; какое из них показывать, решает параметр role в адресе.
-const role = new URLSearchParams(location.search).get('role');
-document.documentElement.dataset.role = role;
+// Общая часть для всех окон оболочки: связь с программой, тема, язык.
+// Остальные скрипты (bar.js, island.js, menu.js) подписываются на данные через BD.on.
+const BD = {
+  role: new URLSearchParams(location.search).get('role'),
+  state: null,
+  handlers: {},
 
-let state = null;
+  send(message) { chrome.webview.postMessage(message); },
 
-const send = (message) => chrome.webview.postMessage(message);
-const t = (key) => state?.strings?.[key] ?? key;
+  /** Перевод по ключу на текущий язык. */
+  t(key) { return BD.state?.strings?.[key] ?? key; },
 
-function render() {
+  /** Подписка: 'state' — тема и язык, остальные названия — темы данных от программы (sys, tray, media, menu). */
+  on(type, handler) { (BD.handlers[type] ??= []).push(handler); },
+
+  /** Прямоугольник элемента в координатах страницы — программа переводит его в координаты экрана. */
+  rect(element) {
+    const r = element.getBoundingClientRect();
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  },
+
+  start() {
+    chrome.webview.addEventListener('message', (event) => {
+      const message = event.data;
+      if (message?.type === 'state') {
+        BD.state = message;
+        applyState();
+      }
+      for (const handler of BD.handlers[message?.type] ?? []) handler(message.type === 'state' ? message : message.data);
+    });
+    BD.send({ type: 'ready' });
+  },
+};
+
+document.documentElement.dataset.role = BD.role;
+// Окна оболочки — не веб-страница: собственное меню по правой кнопке им не нужно.
+document.addEventListener('contextmenu', (event) => event.preventDefault());
+
+function applyState() {
+  const state = BD.state;
   document.documentElement.lang = state.language;
   document.documentElement.dataset.theme = state.theme.id;
   const link = document.getElementById('theme');
@@ -16,27 +46,6 @@ function render() {
   // Класс paused останавливает анимации, пока открыто полноэкранное приложение.
   document.body.classList.toggle('paused', state.paused);
 
-  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
-  document.getElementById('monitor').textContent = state.monitor;
-  document.getElementById('theme-name').textContent = state.themes.find((x) => x.id === state.theme.id)?.name ?? state.theme.id;
-  document.getElementById('language-name').textContent = state.language.toUpperCase();
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = BD.t(el.dataset.i18n);
+  for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = BD.t(el.dataset.i18nTitle);
 }
-
-const next = (list, current) => list[(list.indexOf(current) + 1) % list.length];
-
-document.getElementById('theme-button').addEventListener('click', () => {
-  send({ type: 'setTheme', id: next(state.themes.map((x) => x.id), state.theme.id) });
-});
-document.getElementById('language-button').addEventListener('click', () => {
-  send({ type: 'setLanguage', language: next(state.languages, state.language) });
-});
-document.getElementById('exit-button').addEventListener('click', () => send({ type: 'exit' }));
-
-chrome.webview.addEventListener('message', (event) => {
-  if (event.data?.type === 'state') {
-    state = event.data;
-    render();
-  }
-});
-
-send({ type: 'ready' });

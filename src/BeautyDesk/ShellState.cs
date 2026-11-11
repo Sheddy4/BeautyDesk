@@ -94,9 +94,24 @@ internal static class ShellState
 
     // ---------- панель задач ----------
 
+    /// <summary>
+    /// Настоящая панель задач Проводника. Для приёма иконок трея наш процесс создаёт
+    /// собственное окно с тем же классом Shell_TrayWnd — его нужно пропустить.
+    /// </summary>
+    private static IntPtr MainTaskbar()
+    {
+        var next = IntPtr.Zero;
+        while ((next = Native.FindWindowEx(IntPtr.Zero, next, "Shell_TrayWnd", null)) != IntPtr.Zero)
+        {
+            Native.GetWindowThreadProcessId(next, out var pid);
+            if (pid != Environment.ProcessId) return next;
+        }
+        return IntPtr.Zero;
+    }
+
     private static IEnumerable<IntPtr> TaskbarWindows()
     {
-        var main = Native.FindWindow("Shell_TrayWnd", null);
+        var main = MainTaskbar();
         if (main != IntPtr.Zero) yield return main;
         var next = IntPtr.Zero;
         while ((next = Native.FindWindowEx(IntPtr.Zero, next, "Shell_SecondaryTrayWnd", null)) != IntPtr.Zero)
@@ -106,7 +121,7 @@ internal static class ShellState
     private static Native.APPBARDATA TaskbarData() => new()
     {
         cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.APPBARDATA>(),
-        hWnd = Native.FindWindow("Shell_TrayWnd", null)
+        hWnd = MainTaskbar()
     };
 
     private static bool GetTaskbarAutoHide()
