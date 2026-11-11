@@ -1,0 +1,13 @@
+/* Linux-райс: плотная тонкая панель, прямые углы, терминальная палитра. */
+:root {
+  --bd-font: "Cascadia Code", Consolas, monospace;
+  --bd-font-size: 12px;
+  --bd-fg: #cdd6f4;
+  --bd-muted: #7f849c;
+  --bd-accent: #89b4fa;
+  --bd-surface: #1e1e2e;
+  --bd-border: 1px solid #313244;
+  --bd-radius: 0;
+  --bd-control-bg: #313244;
+  --bd-control-radius: 0;
+}

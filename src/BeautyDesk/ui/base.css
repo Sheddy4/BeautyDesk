@@ -1,0 +1,78 @@
+/*
+  Базовые стили оболочки. Тема меняет вид через переменные --bd-* в своём theme.css
+  и при желании может переопределить любые правила отсюда.
+*/
+:root {
+  --bd-font: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --bd-font-size: 13px;
+  --bd-fg: #f2f2f2;
+  --bd-muted: rgba(242, 242, 242, 0.55);
+  --bd-accent: #4c9aff;
+  --bd-surface: rgba(20, 20, 20, 0.8);
+  --bd-border: 1px solid rgba(255, 255, 255, 0.1);
+  --bd-radius: 10px;
+  --bd-control-bg: rgba(255, 255, 255, 0.08);
+  --bd-control-radius: 6px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font-family: var(--bd-font);
+  font-size: var(--bd-font-size);
+  color: var(--bd-fg);
+}
+
+.surface {
+  height: 100%;
+  background: var(--bd-surface);
+  display: none;
+  align-items: center;
+}
+
+html[data-role="bar"] #bar {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-bottom: var(--bd-border);
+}
+
+html[data-role="dock"] #dock {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  border: var(--bd-border);
+  border-radius: var(--bd-radius);
+}
+
+.group { display: flex; align-items: center; gap: 10px; }
+.brand { font-weight: 600; }
+.muted { color: var(--bd-muted); }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bd-control-bg);
+  border: 0;
+  border-radius: var(--bd-control-radius);
+  padding: 2px 8px;
+  cursor: default;
+}
+button:hover { background: color-mix(in srgb, var(--bd-control-bg), var(--bd-fg) 12%); }
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+  animation: bd-pulse 1.6s ease-in-out infinite;
+}
+@keyframes bd-pulse { 50% { opacity: 0.25; } }
+
+/* Полноэкранное приложение: все анимации стоят. */
+body.paused *, body.paused *::before, body.paused *::after { animation-play-state: paused !important; }

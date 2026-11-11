@@ -1,0 +1,14 @@
+/* Тёмный ретро-тех: моноширинный шрифт, приглушённые цвета, красный акцент. */
+:root {
+  --bd-font: "Cascadia Mono", Consolas, monospace;
+  --bd-font-size: 12px;
+  --bd-fg: #e8e2d0;
+  --bd-muted: rgba(232, 226, 208, 0.5);
+  --bd-accent: #d7332a;
+  --bd-surface: rgba(12, 12, 12, 0.86);
+  --bd-border: 1px solid rgba(232, 226, 208, 0.14);
+  --bd-radius: 6px;
+  --bd-control-bg: rgba(232, 226, 208, 0.08);
+  --bd-control-radius: 2px;
+}
+.brand { letter-spacing: 0.18em; text-transform: uppercase; }

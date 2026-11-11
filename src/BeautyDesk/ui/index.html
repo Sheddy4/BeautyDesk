@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" id="theme">
+</head>
+<body>
+  <!-- Верхняя панель. Пока каркас: содержимое появится на этапе 3. -->
+  <div id="bar" class="surface">
+    <div class="group">
+      <span class="status-dot"></span>
+      <span class="brand">BeautyDesk</span>
+      <span class="muted"><span data-i18n="bar.monitor"></span> <span id="monitor"></span></span>
+    </div>
+    <div class="group">
+      <button id="theme-button"><span data-i18n="bar.theme"></span>: <span id="theme-name"></span></button>
+      <button id="language-button"><span data-i18n="bar.language"></span>: <span id="language-name"></span></button>
+      <button id="exit-button" data-i18n="bar.exit"></button>
+    </div>
+  </div>
+
+  <!-- Док. Пока каркас. -->
+  <div id="dock" class="surface">
+    <span class="status-dot"></span>
+    <span class="muted" data-i18n="dock.placeholder"></span>
+  </div>
+
+  <script src="shell.js"></script>
+</body>
+</html>
