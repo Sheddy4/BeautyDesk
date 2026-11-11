@@ -130,6 +130,7 @@ internal sealed class DesktopHost
             _windows.Add(window);
             // «Остров» появляется, только когда что-то играет.
             await window.InitAsync(_environment!, BoundsFor(window), startHidden: role == ShellRole.Island);
+            if (role == ShellRole.Island) ClipIsland(window);
         }
 
         // Меню одно на все экраны: создаётся заранее, чтобы открываться без задержки.
@@ -157,14 +158,27 @@ internal sealed class DesktopHost
             }
             case ShellRole.Island:
             {
-                int w = Px(monitor, window.Expanded ? IslandExpandedWidth : IslandWidth);
-                int h = Px(monitor, window.Expanded ? IslandExpandedHeight : theme.BarHeight);
+                // Окно всегда развёрнутого размера; в свёрнутом виде от него оставлена только плашка (см. ClipIsland).
+                int w = Px(monitor, IslandExpandedWidth), h = Px(monitor, IslandExpandedHeight);
                 int left = m.Left + (m.Width - w) / 2;
                 return new Native.RECT { Left = left, Top = m.Top, Right = left + w, Bottom = m.Top + h };
             }
             default:
                 return window.Bounds;
         }
+    }
+
+    /// <summary>
+    /// Свёрнутый «остров» — узкая плашка в высоту панели. Менять размер окна при наведении нельзя:
+    /// страница перерисовывается рывками. Вместо этого окно обрезается, а лишняя часть пропускает клики.
+    /// </summary>
+    private void ClipIsland(ShellWindow island)
+    {
+        if (island.Expanded) { island.SetClip(null); return; }
+        var monitor = island.Monitor;
+        int full = Px(monitor, IslandExpandedWidth), w = Px(monitor, IslandWidth);
+        int left = (full - w) / 2;
+        island.SetClip(new Native.RECT { Left = left, Top = 0, Right = left + w, Bottom = Px(monitor, CurrentTheme.BarHeight) });
     }
 
     private void Tick()
@@ -242,6 +256,8 @@ internal sealed class DesktopHost
             monitor = window.Monitor.Index + 1,
             // Метка времени в адресе заставляет страницу перечитать стили после правок в папке темы.
             theme = new { id = theme.Id, css = $"{theme.CssUrl}?v={File.GetLastWriteTimeUtc(Path.Combine(theme.Dir, "theme.css")).Ticks}" },
+            barHeight = theme.BarHeight,
+            islandWidth = IslandWidth,
             language = _settings.Language,
             strings = Strings(_settings.Language),
             paused = _fullscreenMonitor != IntPtr.Zero
@@ -285,7 +301,7 @@ internal sealed class DesktopHost
 
             case "islandExpand" when window.Role == ShellRole.Island && message.TryGetProperty("value", out var value):
                 window.Expanded = value.ValueKind == JsonValueKind.True;
-                window.SetBounds(BoundsFor(window));
+                ClipIsland(window);
                 break;
 
             case "openMenu" when message.TryGetProperty("rect", out var anchor):
@@ -442,7 +458,11 @@ internal sealed class DesktopHost
         if (_themes.All(t => t.Id != id)) return;
         _settings.Theme = id!;
         _settings.Save();
-        foreach (var w in _windows) w.SetBounds(BoundsFor(w));
+        foreach (var w in _windows)
+        {
+            w.SetBounds(BoundsFor(w));
+            if (w.Role == ShellRole.Island) ClipIsland(w);
+        }
         ApplyWallpaper();
         Broadcast();
         Log.Write($"Тема: {id}");

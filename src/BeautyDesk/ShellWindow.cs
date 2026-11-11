@@ -16,6 +16,22 @@ internal enum ShellRole { Bar, Dock, Island, Menu }
 /// Где окну стоять, решает <see cref="DesktopHost"/>; панель дополнительно резервирует место
 /// вверху экрана, чтобы развёрнутые окна под неё не заезжали.
 /// </summary>
+/// <summary>
+/// Клик по странице внутри WebView2 делает наше окно активным, хотя оно об этом не просит.
+/// Чтобы человек не терял фокус в своей программе (и чтобы иконки трея видели её активной),
+/// запоминаем последнее чужое окно и сразу возвращаем ему фокус.
+/// </summary>
+internal static class ExternalFocus
+{
+    /// <summary>Последнее активное окно, не принадлежащее BeautyDesk.</summary>
+    public static IntPtr Last { get; set; }
+
+    public static void Restore()
+    {
+        if (Last != IntPtr.Zero && Native.IsWindow(Last)) Native.SetForegroundWindow(Last);
+    }
+}
+
 internal sealed class ShellWindow : Window
 {
     private static readonly uint AppBarCallback = Native.RegisterWindowMessage("BeautyDesk.AppBar");
@@ -123,6 +139,17 @@ internal sealed class ShellWindow : Window
         else Hide();
     }
 
+    /// <summary>
+    /// Оставляет от окна только указанную часть (в пикселях от его левого верхнего угла): остальное
+    /// не рисуется и пропускает клики насквозь. null — окно целиком.
+    /// </summary>
+    public void SetClip(Native.RECT? part)
+    {
+        // Windows забирает область себе, удалять её после вызова не нужно.
+        var region = part is { } r ? Native.CreateRectRgn(r.Left, r.Top, r.Right, r.Bottom) : IntPtr.Zero;
+        Native.SetWindowRgn(_hwnd, region, true);
+    }
+
     /// <summary>Поднимает окно над остальными окнами оболочки.</summary>
     public void Raise() =>
         Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
@@ -168,6 +195,8 @@ internal sealed class ShellWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == Native.WM_ACTIVATE && (wParam.ToInt64() & 0xFFFF) != 0)
+            Dispatcher.BeginInvoke(ExternalFocus.Restore);
         if (Role != ShellRole.Bar) return IntPtr.Zero;
         if ((uint)msg == AppBarCallback && wParam.ToInt32() == Native.ABN_POSCHANGED)
         {

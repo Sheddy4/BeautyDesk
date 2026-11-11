@@ -121,7 +121,11 @@ html[data-role="dock"] #dock {
 
 html[data-role="island"] #island {
   position: absolute;
-  inset: 3px 6px;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--bd-island-width) - 12px);
+  height: calc(var(--bd-bar-height) - 6px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -131,8 +135,14 @@ html[data-role="island"] #island {
   background: var(--bd-island-bg);
   color: var(--bd-island-fg);
   border-radius: 14px;
+  transition: width 0.22s ease, height 0.22s ease, border-radius 0.22s ease, padding 0.22s ease;
 }
-html[data-role="island"] #island.expanded { inset: 3px 6px 6px; padding: 14px; border-radius: 22px; }
+html[data-role="island"] #island.expanded {
+  width: calc(100% - 12px);
+  height: calc(100% - 9px);
+  padding: 14px;
+  border-radius: 22px;
+}
 
 .island-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 #media-cover { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; flex: none; }
@@ -190,3 +200,9 @@ html[data-role="menu"] #menu {
 
 /* Полноэкранное приложение: все анимации стоят. */
 body.paused *, body.paused *::before, body.paused *::after { animation-play-state: paused !important; }
+
+/* Левая и правая части панели не заходят под «остров» в центре; лишние иконки трея обрезаются слева. */
+html[data-role="bar"] .group { max-width: calc(50% - var(--bd-island-width, 260px) / 2 - 8px); }
+html[data-role="bar"] .group > * { flex: none; }
+html[data-role="bar"] #tray { flex: 0 1 auto; min-width: 0; overflow: hidden; justify-content: flex-end; }
+html[data-role="bar"] #active-app { flex: 0 1 auto; }

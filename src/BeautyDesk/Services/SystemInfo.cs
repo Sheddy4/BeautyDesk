@@ -56,6 +56,11 @@ internal sealed class SystemInfo : IDisposable
         if (slow) RebindAudioDevice();
 
         var foreground = Native.GetForegroundWindow();
+        if (foreground != IntPtr.Zero)
+        {
+            Native.GetWindowThreadProcessId(foreground, out var pid);
+            if (pid != Environment.ProcessId) ExternalFocus.Last = foreground;
+        }
         var (volume, muted) = ReadVolume();
         var (battery, charging) = ReadBattery();
         var next = new Snapshot(ReadActiveApp(foreground), ReadLayout(foreground), battery, charging, _network, volume, muted);

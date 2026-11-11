@@ -40,6 +40,8 @@ function applyState() {
   const state = BD.state;
   document.documentElement.lang = state.language;
   document.documentElement.dataset.theme = state.theme.id;
+  document.documentElement.style.setProperty('--bd-bar-height', `${state.barHeight}px`);
+  document.documentElement.style.setProperty('--bd-island-width', `${state.islandWidth}px`);
   const link = document.getElementById('theme');
   if (link.getAttribute('href') !== state.theme.css) link.setAttribute('href', state.theme.css);
 

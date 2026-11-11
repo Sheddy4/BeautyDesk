@@ -43,19 +43,21 @@ if (BD.role === 'island') {
   function setExpanded(expanded) {
     clearTimeout(collapseTimer);
     if (expanded) {
+      // Сначала программа открывает окно целиком, потом плашка плавно растёт.
       BD.send({ type: 'islandExpand', value: true });
       island.classList.add('expanded');
     } else {
-      // Сначала сворачиваем содержимое, потом просим уменьшить окно — иначе его обрежет на полпути.
+      // Сначала плашка плавно сжимается, потом программа обрезает окно до её размера.
       island.classList.remove('expanded');
-      collapseTimer = setTimeout(() => BD.send({ type: 'islandExpand', value: false }), 200);
+      collapseTimer = setTimeout(() => BD.send({ type: 'islandExpand', value: false }), 260);
     }
   }
 
+  // Окно обрезано по плашке, поэтому курсор «входит» и «выходит» ровно по её краям.
   document.documentElement.addEventListener('mouseenter', () => setExpanded(true));
   document.documentElement.addEventListener('mouseleave', () => {
     clearTimeout(collapseTimer);
-    collapseTimer = setTimeout(() => setExpanded(false), 250);
+    collapseTimer = setTimeout(() => setExpanded(false), 300);
   });
 
   $('media-previous').addEventListener('click', () => BD.send({ type: 'media', action: 'previous' }));
