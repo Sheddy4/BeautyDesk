@@ -110,11 +110,68 @@ html[data-role="bar"] #bar {
 /* ---------- док ---------- */
 
 html[data-role="dock"] #dock {
+  position: absolute;
+  left: 50%;
+  bottom: var(--bd-dock-margin, 8px);
+  transform: translateX(-50%);
   display: flex;
-  justify-content: center;
-  gap: 8px;
+  align-items: flex-end; /* иконки растут вверх, выходя за пределы подложки */
+  height: var(--bd-dock-height, 64px);
+  padding: 0 8px;
+  transition: transform 0.2s ease;
+}
+/* Подложка дока: остаётся прежней высоты, когда иконки под курсором увеличиваются. */
+html[data-role="dock"] #dock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--bd-surface);
   border: var(--bd-border);
   border-radius: var(--bd-radius);
+}
+/* Развёрнутое окно на экране: док уезжает за нижний край и возвращается, когда курсор подведён к краю. */
+body.dock-hidden #dock { transform: translate(-50%, calc(100% + var(--bd-dock-margin, 8px) + 4px)); }
+
+.dock-item {
+  --size: 44px;
+  position: relative;
+  flex: none;
+  display: flex;
+  padding: 0 4px 10px;
+}
+.dock-item img {
+  width: var(--size);
+  height: var(--size);
+  object-fit: contain;
+  transition: width 0.12s ease-out, height 0.12s ease-out;
+}
+.dock-item.dragging { opacity: 0.55; }
+
+/* Точка под запущенной программой; у активной — полоска цвета акцента. */
+.dock-item::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--bd-fg);
+  opacity: 0;
+  transition: width 0.15s ease, margin-left 0.15s ease;
+}
+.dock-item.running::after { opacity: 0.7; }
+.dock-item.active::after { width: 12px; margin-left: -6px; background: var(--bd-accent); opacity: 1; }
+
+.dock-separator {
+  flex: none;
+  width: 1px;
+  height: calc(var(--bd-dock-height, 64px) - 24px);
+  margin: 0 6px 12px;
+  background: currentColor;
+  opacity: 0.2;
 }
 
 /* ---------- «остров» ---------- */

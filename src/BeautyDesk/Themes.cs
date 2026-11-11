@@ -13,7 +13,6 @@ internal sealed record Theme(
     bool IsUser,
     IReadOnlyDictionary<string, string> Names,
     double BarHeight,
-    double DockWidth,
     double DockHeight,
     string? WallpaperPath)
 {
@@ -76,7 +75,6 @@ internal static class Themes
                 IsUser: isUser,
                 Names: names,
                 BarHeight: Number(root, "barHeight", 30, 20, 80),
-                DockWidth: Number(root, "dockWidth", 560, 200, 2000),
                 DockHeight: Number(root, "dockHeight", 64, 32, 200),
                 WallpaperPath: wallpaper);
         }

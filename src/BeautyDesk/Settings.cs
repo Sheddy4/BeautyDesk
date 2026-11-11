@@ -2,6 +2,8 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 
+using BeautyDesk.Services;
+
 namespace BeautyDesk;
 
 /// <summary>Пользовательские настройки, хранятся в %APPDATA%\BeautyDesk\settings.json.</summary>
@@ -12,6 +14,8 @@ internal sealed class Settings
     public bool ShowDesktopIcons { get; set; }
     /// <summary>Своя картинка вместо обоев темы; null — брать из темы.</summary>
     public string? Wallpaper { get; set; }
+    /// <summary>Закреплённое в доке; null — ещё не настраивалось, при первом запуске заполнится само.</summary>
+    public List<DockPin>? Dock { get; set; }
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 

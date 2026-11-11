@@ -42,6 +42,8 @@ function applyState() {
   document.documentElement.dataset.theme = state.theme.id;
   document.documentElement.style.setProperty('--bd-bar-height', `${state.barHeight}px`);
   document.documentElement.style.setProperty('--bd-island-width', `${state.islandWidth}px`);
+  document.documentElement.style.setProperty('--bd-dock-height', `${state.dockHeight}px`);
+  document.documentElement.style.setProperty('--bd-dock-margin', `${state.dockMargin}px`);
   const link = document.getElementById('theme');
   if (link.getAttribute('href') !== state.theme.css) link.setAttribute('href', state.theme.css);
 

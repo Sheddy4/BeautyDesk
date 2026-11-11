@@ -23,6 +23,9 @@ internal sealed class DesktopHost
     // Размеры в единицах, не зависящих от масштаба экрана (как px в CSS).
     private const double DockBottomMargin = 8;
     private const double IslandWidth = 260, IslandExpandedWidth = 380, IslandExpandedHeight = 150;
+    // Окно дока выше самого дока: в запас помещаются увеличенные под курсором иконки.
+    private const double DockWindowHeightFactor = 2.4;
+    private const double MenuWideWidth = 300;
     private const double MenuWidth = 240, MenuItemHeight = 30, MenuSeparatorHeight = 9, MenuPadding = 14, MenuGap = 4;
 
     // Окна самой Windows, которые занимают весь экран, но полноэкранным приложением не являются.
@@ -33,8 +36,6 @@ internal sealed class DesktopHost
     ];
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-
-    private sealed record MenuItem(string Id, string Label = "", bool Separator = false, bool Confirm = false);
 
     private readonly Settings _settings = Settings.Load();
     private readonly List<ShellWindow> _windows = [];
@@ -48,7 +49,12 @@ internal sealed class DesktopHost
     private ShellManager? _shell;
     private TrayIcons? _tray;
     private ShellWindow? _menu;
-    private IntPtr _fullscreenMonitor;
+    private Dock? _dock;
+    private DockController? _dockController;
+    private int _dockIconsVersion = -1;
+    private int _tick;
+    private string? _menuOwner;
+    private IntPtr _fullscreenMonitor, _maximizedMonitor;
     private Native.RECT _menuAnchor;
     private Native.LowLevelMouseProc? _mouseProc;
     private IntPtr _mouseHook;
@@ -62,10 +68,13 @@ internal sealed class DesktopHost
         ShellState.Hide(!_settings.ShowDesktopIcons);
         ApplyWallpaper();
 
-        // Из ManagedShell нужен только трей; список окон понадобится доку.
-        var config = ShellManager.DefaultShellConfig;
-        config.EnableTasksService = false;
-        _shell = new ShellManager(config);
+        // ManagedShell даёт иконки трея и список открытых окон.
+        _shell = new ShellManager(ShellManager.DefaultShellConfig);
+        _dock = new Dock(_shell.Tasks, _settings);
+        _dockController = new DockController(_dock,
+            key => Strings(_settings.Language).GetValueOrDefault(key, key),
+            (window, anchor, owner, items) => OpenMenu(window, anchor, owner, items, above: true));
+        _dock.Changed += PublishDock;
         _tray = new TrayIcons(_shell.NotificationArea);
         _tray.Changed += () => Publish("tray", _tray.Snapshot());
         _system.Changed += () => Publish("sys", _system.Current);
@@ -76,6 +85,7 @@ internal sealed class DesktopHost
         await _media.StartAsync();
 
         Publish("tray", _tray.Snapshot());
+        PublishDock();
         Publish("media", _media.Current);
         _system.Refresh();
         Publish("sys", _system.Current);
@@ -104,6 +114,7 @@ internal sealed class DesktopHost
         foreach (var w in _windows) w.Close();
         _windows.Clear();
         _menu?.Close();
+        _dockController?.Close();
         _system.Dispose();
         _shell?.Dispose();
         ShellState.Restore();
@@ -131,6 +142,8 @@ internal sealed class DesktopHost
             // «Остров» появляется, только когда что-то играет.
             await window.InitAsync(_environment!, BoundsFor(window), startHidden: role == ShellRole.Island);
             if (role == ShellRole.Island) ClipIsland(window);
+            // Окно дока шире и выше самого дока; пока страница не сообщила, где он нарисован, окно пропускает все клики.
+            if (role == ShellRole.Dock) window.SetClip(new Native.RECT { Right = 1, Bottom = 1 });
         }
 
         // Меню одно на все экраны: создаётся заранее, чтобы открываться без задержки.
@@ -152,9 +165,9 @@ internal sealed class DesktopHost
                 return new Native.RECT { Left = m.Left, Top = m.Top, Right = m.Right, Bottom = m.Top + Px(monitor, theme.BarHeight) };
             case ShellRole.Dock:
             {
-                int w = Math.Min(Px(monitor, theme.DockWidth), m.Width), h = Px(monitor, theme.DockHeight);
-                int left = m.Left + (m.Width - w) / 2, top = m.Bottom - h - Px(monitor, DockBottomMargin);
-                return new Native.RECT { Left = left, Top = top, Right = left + w, Bottom = top + h };
+                // Во всю ширину экрана у нижнего края; видимую часть вырезает сама страница (сообщение clip).
+                int h = Px(monitor, theme.DockHeight * DockWindowHeightFactor + DockBottomMargin);
+                return new Native.RECT { Left = m.Left, Top = m.Bottom - h, Right = m.Right, Bottom = m.Bottom };
             }
             case ShellRole.Island:
             {
@@ -185,12 +198,15 @@ internal sealed class DesktopHost
     {
         ShellState.KeepHidden(!_settings.ShowDesktopIcons);
         _system.Refresh();
+        if (_tick++ % 6 == 0) _dock?.RefreshTrash();
 
-        var fullscreen = FullscreenMonitor();
-        if (fullscreen == _fullscreenMonitor) return;
+        var (fullscreen, maximized) = ForegroundCoverage();
+        if (fullscreen == _fullscreenMonitor && maximized == _maximizedMonitor) return;
         _fullscreenMonitor = fullscreen;
+        _maximizedMonitor = maximized;
         UpdateVisibility();
-        Broadcast(); // страницы останавливают анимации, пока открыто полноэкранное приложение
+        // Страницы останавливают анимации при полноэкранном приложении, а док прячется при развёрнутом окне.
+        Broadcast();
     }
 
     private void UpdateVisibility()
@@ -204,21 +220,26 @@ internal sealed class DesktopHost
         foreach (var w in _windows.Where(w => w.Role == ShellRole.Island && w.IsVisible)) w.Raise();
     }
 
-    /// <summary>Экран, который целиком занят активным приложением (игра, видео на весь экран), или Zero.</summary>
-    private IntPtr FullscreenMonitor()
+    /// <summary>
+    /// На каком экране активное окно занимает всё место: целиком (игра, видео на весь экран — первый результат)
+    /// или развёрнуто кнопкой «развернуть» (второй). Zero — такого экрана нет.
+    /// </summary>
+    private (IntPtr Fullscreen, IntPtr Maximized) ForegroundCoverage()
     {
         var foreground = Native.GetForegroundWindow();
-        if (foreground == IntPtr.Zero) return IntPtr.Zero;
+        if (foreground == IntPtr.Zero) return default;
         Native.GetWindowThreadProcessId(foreground, out var pid);
-        if (pid == Environment.ProcessId) return IntPtr.Zero;
-        if (NotFullscreenClasses.Contains(Native.ClassName(foreground))) return IntPtr.Zero;
-        if (!Native.GetWindowRect(foreground, out var r)) return IntPtr.Zero;
+        // Пока активна сама оболочка (клик по иконке трея), оставляем всё как было.
+        if (pid == Environment.ProcessId) return (_fullscreenMonitor, _maximizedMonitor);
+        if (NotFullscreenClasses.Contains(Native.ClassName(foreground))) return default;
+        if (!Native.GetWindowRect(foreground, out var r)) return default;
 
         var handle = Native.MonitorFromWindow(foreground, 2 /* ближайший экран */);
         var monitor = _windows.Select(w => w.Monitor).FirstOrDefault(m => m.Handle == handle);
-        if (monitor is null) return IntPtr.Zero;
+        if (monitor is null) return default;
         var b = monitor.Bounds;
-        return r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom ? handle : IntPtr.Zero;
+        if (r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom) return (handle, IntPtr.Zero);
+        return Native.IsZoomed(foreground) ? (IntPtr.Zero, handle) : default;
     }
 
     // ---------- данные для страниц ----------
@@ -227,6 +248,7 @@ internal sealed class DesktopHost
     private static ShellRole RoleFor(string topic) => topic switch
     {
         "media" => ShellRole.Island,
+        "dock" or "dockIcons" => ShellRole.Dock,
         "menu" => ShellRole.Menu,
         _ => ShellRole.Bar
     };
@@ -240,6 +262,18 @@ internal sealed class DesktopHost
         if (_topics.TryGetValue(topic, out var last) && last == json) return;
         _topics[topic] = json;
         foreach (var w in AllWindows.Where(w => w.Role == RoleFor(topic))) w.Post(json);
+    }
+
+    private void PublishDock()
+    {
+        if (_dock is null) return;
+        var items = _dock.Items(); // заодно подгружает недостающие иконки
+        if (_dock.IconsVersion != _dockIconsVersion)
+        {
+            _dockIconsVersion = _dock.IconsVersion;
+            Publish("dockIcons", _dock.Icons);
+        }
+        Publish("dock", new { items });
     }
 
     private void Broadcast()
@@ -257,6 +291,9 @@ internal sealed class DesktopHost
             // Метка времени в адресе заставляет страницу перечитать стили после правок в папке темы.
             theme = new { id = theme.Id, css = $"{theme.CssUrl}?v={File.GetLastWriteTimeUtc(Path.Combine(theme.Dir, "theme.css")).Ticks}" },
             barHeight = theme.BarHeight,
+            dockHeight = theme.DockHeight,
+            dockMargin = DockBottomMargin,
+            dockHidden = window.Monitor.Handle == _maximizedMonitor,
             islandWidth = IslandWidth,
             language = _settings.Language,
             strings = Strings(_settings.Language),
@@ -280,6 +317,19 @@ internal sealed class DesktopHost
                 if (Text(message, "kind") == "down") window.TakeForeground();
                 _tray?.Mouse(Number(message, "id"), Text(message, "kind") ?? "", Text(message, "button"), ToScreen(window, rect));
                 break;
+
+            case "dock":
+                _dockController?.Handle(window, message, message.TryGetProperty("rect", out var itemRect) ? ToScreen(window, itemRect) : default);
+                break;
+
+            case "clip" when window.Role == ShellRole.Dock && message.TryGetProperty("rect", out var clip):
+            {
+                // Страница дока сообщает, какая часть окна сейчас занята; остальное пропускает клики.
+                var screen = ToScreen(window, clip);
+                var b = window.Bounds;
+                window.SetClip(new Native.RECT { Left = screen.Left - b.Left, Top = screen.Top - b.Top, Right = screen.Right - b.Left, Bottom = screen.Bottom - b.Top });
+                break;
+            }
 
             case "volumeStep":
                 _system.StepVolume(Number(message, "delta"));
@@ -356,19 +406,31 @@ internal sealed class DesktopHost
         ];
     }
 
-    private void ToggleSystemMenu(ShellWindow from, Native.RECT anchor)
+    private void ToggleSystemMenu(ShellWindow from, Native.RECT anchor) =>
+        OpenMenu(from, anchor, "system", SystemMenuItems(), above: false);
+
+    /// <summary>
+    /// Открывает меню у указанного места экрана. Повторный вызов с тем же владельцем закрывает его —
+    /// так кнопка меню работает как переключатель.
+    /// </summary>
+    private void OpenMenu(ShellWindow from, Native.RECT anchor, string owner, List<MenuItem> items, bool above)
     {
         if (_menu is null) return;
-        if (_menu.IsVisible) { CloseMenu(); return; }
+        bool sameOwner = _menu.IsVisible && _menuOwner == owner;
+        CloseMenu();
+        if (sameOwner || items.Count == 0) return;
 
-        var items = SystemMenuItems();
         var monitor = from.Monitor;
-        int width = Px(monitor, MenuWidth);
+        int width = Px(monitor, above ? MenuWideWidth : MenuWidth);
         int height = Px(monitor, MenuPadding + items.Sum(i => i.Separator ? MenuSeparatorHeight : MenuItemHeight));
-        int left = Math.Clamp(anchor.Left, monitor.Bounds.Left, monitor.Bounds.Right - width);
-        int top = from.Bounds.Bottom + Px(monitor, MenuGap);
+        int gap = Px(monitor, MenuGap);
+        // Меню панели выпадает вниз от кнопки, меню дока поднимается над иконкой по её центру.
+        int left = above ? anchor.Left + anchor.Width / 2 - width / 2 : anchor.Left;
+        left = Math.Clamp(left, monitor.Bounds.Left + gap, Math.Max(monitor.Bounds.Left + gap, monitor.Bounds.Right - width - gap));
+        int top = above ? anchor.Top - height - gap : from.Bounds.Bottom + gap;
 
         _menuAnchor = anchor;
+        _menuOwner = owner;
         _menu.Monitor = monitor;
         _menu.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
         _menu.Post(StateJson(_menu));
@@ -381,6 +443,7 @@ internal sealed class DesktopHost
 
     private void CloseMenu()
     {
+        _menuOwner = null;
         WatchOutsideClicks(false);
         _menu?.SetShown(false);
     }
@@ -419,6 +482,12 @@ internal sealed class DesktopHost
 
     private void RunMenuAction(string? id)
     {
+        if (id is not null && _dockController?.RunMenuAction(id) == true)
+        {
+            CloseMenu();
+            return;
+        }
+
         switch (id)
         {
             // Тема и язык меняются на месте, меню остаётся открытым с обновлёнными подписями.

@@ -23,6 +23,7 @@ internal static class Native
     public const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_NOREPEAT = 0x4000;
 
     public const uint DWM_BB_ENABLE = 1, DWM_BB_BLURREGION = 2;
+    public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
 
     public const int WH_MOUSE_LL = 14, WM_LBUTTONDOWN = 0x201, WM_RBUTTONDOWN = 0x204, WM_MBUTTONDOWN = 0x207;
 
@@ -77,6 +78,17 @@ internal static class Native
         public uint BatteryLifeTime, BatteryFullLifeTime;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DWM_THUMBNAIL_PROPERTIES
+    {
+        public int dwFlags;
+        public RECT rcDestination;
+        public RECT rcSource;
+        public byte opacity;
+        [MarshalAs(UnmanagedType.Bool)] public bool fVisible;
+        [MarshalAs(UnmanagedType.Bool)] public bool fSourceClientAreaOnly;
+    }
+
     public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, IntPtr lprc, IntPtr data);
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
     public delegate IntPtr LowLevelMouseProc(int code, IntPtr wParam, IntPtr lParam);
@@ -93,6 +105,7 @@ internal static class Native
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX info);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
@@ -128,6 +141,11 @@ internal static class Native
     [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr hMonitor, int type, out uint dpiX, out uint dpiY);
 
     [DllImport("dwmapi.dll")] public static extern int DwmEnableBlurBehindWindow(IntPtr hwnd, ref DWM_BLURBEHIND blur);
+    [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+    [DllImport("dwmapi.dll")] public static extern int DwmRegisterThumbnail(IntPtr destination, IntPtr source, out IntPtr thumbnail);
+    [DllImport("dwmapi.dll")] public static extern int DwmUnregisterThumbnail(IntPtr thumbnail);
+    [DllImport("dwmapi.dll")] public static extern int DwmQueryThumbnailSourceSize(IntPtr thumbnail, out POINT size);
+    [DllImport("dwmapi.dll")] public static extern int DwmUpdateThumbnailProperties(IntPtr thumbnail, ref DWM_THUMBNAIL_PROPERTIES properties);
 
     [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int l, int t, int r, int b);
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);

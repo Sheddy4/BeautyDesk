@@ -4,7 +4,6 @@
   "bar.notifications": "Уведомления",
   "bar.noSound": "Нет устройства звука",
   "bar.offline": "Нет подключения",
-  "dock.placeholder": "Док",
   "menu.theme": "Тема",
   "menu.language": "Язык",
   "menu.lock": "Заблокировать",
@@ -15,5 +14,13 @@
   "menu.confirm": "Нажмите ещё раз",
   "media.previous": "Предыдущий трек",
   "media.toggle": "Пауза / воспроизведение",
-  "media.next": "Следующий трек"
+  "media.next": "Следующий трек",
+  "dock.trash": "Корзина",
+  "dock.open": "Открыть",
+  "dock.newWindow": "Новое окно",
+  "dock.pin": "Закрепить в доке",
+  "dock.unpin": "Открепить",
+  "dock.close": "Закрыть",
+  "dock.closeAll": "Закрыть все окна",
+  "dock.emptyTrash": "Очистить корзину"
 }

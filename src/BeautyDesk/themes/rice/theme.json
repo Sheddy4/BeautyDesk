@@ -1,6 +1,8 @@
 {
-  "name": { "ru": "Linux-райс", "en": "Linux Rice" },
+  "name": {
+    "ru": "Linux-райс",
+    "en": "Linux Rice"
+  },
   "barHeight": 26,
-  "dockWidth": 520,
   "dockHeight": 56
 }

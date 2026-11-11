@@ -1,6 +1,8 @@
 {
-  "name": { "ru": "Ретро-тех", "en": "Retro Tech" },
+  "name": {
+    "ru": "Ретро-тех",
+    "en": "Retro Tech"
+  },
   "barHeight": 30,
-  "dockWidth": 560,
   "dockHeight": 64
 }
