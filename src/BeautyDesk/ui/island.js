@@ -57,7 +57,7 @@ if (BD.role === 'island') {
   document.documentElement.addEventListener('mouseenter', () => setExpanded(true));
   document.documentElement.addEventListener('mouseleave', () => {
     clearTimeout(collapseTimer);
-    collapseTimer = setTimeout(() => setExpanded(false), 300);
+    collapseTimer = setTimeout(() => setExpanded(false), 60);
   });
 
   $('media-previous').addEventListener('click', () => BD.send({ type: 'media', action: 'previous' }));

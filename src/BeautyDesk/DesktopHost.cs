@@ -277,6 +277,7 @@ internal sealed class DesktopHost
                 break;
 
             case "tray" when message.TryGetProperty("rect", out var rect):
+                if (Text(message, "kind") == "down") window.TakeForeground();
                 _tray?.Mouse(Number(message, "id"), Text(message, "kind") ?? "", Text(message, "button"), ToScreen(window, rect));
                 break;
 

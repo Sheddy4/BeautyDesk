@@ -19,7 +19,7 @@ internal static class Native
 
     public const uint SPI_SETDESKWALLPAPER = 0x14, SPI_GETDESKWALLPAPER = 0x73, SPIF_SENDCHANGE = 0x2;
 
-    public const int WM_HOTKEY = 0x312, WM_ACTIVATE = 0x6;
+    public const int WM_HOTKEY = 0x312;
     public const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_NOREPEAT = 0x4000;
 
     public const uint DWM_BB_ENABLE = 1, DWM_BB_BLURREGION = 2;
@@ -94,7 +94,6 @@ internal static class Native
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
-    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
