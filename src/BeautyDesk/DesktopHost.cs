@@ -56,7 +56,8 @@ internal sealed class DesktopHost
     private int _dockIconsVersion = -1;
     private int _tick;
     private string? _menuOwner;
-    private IntPtr _fullscreenMonitor, _maximizedMonitor;
+    private IntPtr _fullscreenMonitor;
+    private HashSet<IntPtr> _maximizedMonitors = [];
     private Native.RECT _menuAnchor;
     private Native.LowLevelMouseProc? _mouseProc;
     private IntPtr _mouseHook;
@@ -204,10 +205,11 @@ internal sealed class DesktopHost
         if (_tick++ % 6 == 0) _dock?.RefreshTrash();
         ReportPointer();
 
-        var (fullscreen, maximized) = ForegroundCoverage();
-        if (fullscreen == _fullscreenMonitor && maximized == _maximizedMonitor) return;
+        var fullscreen = FullscreenMonitor();
+        var maximized = MaximizedMonitors();
+        if (fullscreen == _fullscreenMonitor && maximized.SetEquals(_maximizedMonitors)) return;
         _fullscreenMonitor = fullscreen;
-        _maximizedMonitor = maximized;
+        _maximizedMonitors = maximized;
         UpdateVisibility();
         // Страницы останавливают анимации при полноэкранном приложении, а док прячется при развёрнутом окне.
         Broadcast();
@@ -239,26 +241,52 @@ internal sealed class DesktopHost
         foreach (var w in _windows.Where(w => w.Role == ShellRole.Island && w.IsVisible)) w.Raise();
     }
 
-    /// <summary>
-    /// На каком экране активное окно занимает всё место: целиком (игра, видео на весь экран — первый результат)
-    /// или развёрнуто кнопкой «развернуть» (второй). Zero — такого экрана нет.
-    /// </summary>
-    private (IntPtr Fullscreen, IntPtr Maximized) ForegroundCoverage()
+    /// <summary>Экран, который целиком занят активным приложением (игра, видео на весь экран), или Zero.</summary>
+    private IntPtr FullscreenMonitor()
     {
         var foreground = Native.GetForegroundWindow();
-        if (foreground == IntPtr.Zero) return default;
+        if (foreground == IntPtr.Zero) return IntPtr.Zero;
         Native.GetWindowThreadProcessId(foreground, out var pid);
         // Пока активна сама оболочка (клик по иконке трея), оставляем всё как было.
-        if (pid == Environment.ProcessId) return (_fullscreenMonitor, _maximizedMonitor);
-        if (NotFullscreenClasses.Contains(Native.ClassName(foreground))) return default;
-        if (!Native.GetWindowRect(foreground, out var r)) return default;
+        if (pid == Environment.ProcessId) return _fullscreenMonitor;
+        if (NotFullscreenClasses.Contains(Native.ClassName(foreground))) return IntPtr.Zero;
+        if (!Native.GetWindowRect(foreground, out var r)) return IntPtr.Zero;
 
         var handle = Native.MonitorFromWindow(foreground, 2 /* ближайший экран */);
         var monitor = _windows.Select(w => w.Monitor).FirstOrDefault(m => m.Handle == handle);
-        if (monitor is null) return default;
+        if (monitor is null) return IntPtr.Zero;
         var b = monitor.Bounds;
-        if (r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom) return (handle, IntPtr.Zero);
-        return Native.IsZoomed(foreground) ? (IntPtr.Zero, handle) : default;
+        return r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom ? handle : IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Экраны, на которых поверх остальных лежит развёрнутое окно, — на них док прячется.
+    /// Смотрится верхнее окно каждого экрана, а не активное: иначе на втором мониторе док
+    /// висел бы поверх развёрнутого окна, пока человек работает на первом.
+    /// </summary>
+    private HashSet<IntPtr> MaximizedMonitors()
+    {
+        var decided = new HashSet<IntPtr>();   // экраны, верхнее окно которых уже найдено
+        var maximized = new HashSet<IntPtr>();
+        int total = _windows.Select(w => w.Monitor.Handle).Distinct().Count();
+
+        // Окна перечисляются сверху вниз, поэтому первое подходящее окно экрана и есть верхнее.
+        Native.EnumWindows((hwnd, _) =>
+        {
+            if (!Native.IsWindowVisible(hwnd) || Native.IsIconic(hwnd)) return true;
+            if ((Native.GetWindowLongPtr(hwnd, Native.GWL_EXSTYLE).ToInt64() & Native.WS_EX_TOOLWINDOW) != 0) return true;
+            Native.GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == Environment.ProcessId || NotFullscreenClasses.Contains(Native.ClassName(hwnd))) return true;
+            // Окна с других виртуальных рабочих столов и приостановленные приложения числятся видимыми, но «скрыты» системой.
+            if (Native.DwmGetWindowAttribute(hwnd, Native.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            if (Native.WindowTitle(hwnd).Length == 0) return true;
+
+            var monitor = Native.MonitorFromWindow(hwnd, 2 /* ближайший экран */);
+            if (!decided.Add(monitor)) return true;
+            if (Native.IsZoomed(hwnd)) maximized.Add(monitor);
+            return decided.Count < total;
+        }, IntPtr.Zero);
+        return maximized;
     }
 
     // ---------- данные для страниц ----------
@@ -312,7 +340,7 @@ internal sealed class DesktopHost
             barHeight = theme.BarHeight,
             dockHeight = theme.DockHeight,
             dockMargin = DockBottomMargin,
-            dockHidden = window.Monitor.Handle == _maximizedMonitor,
+            dockHidden = _maximizedMonitors.Contains(window.Monitor.Handle),
             islandWidth = IslandWidth,
             language = _settings.Language,
             strings = Strings(_settings.Language),
