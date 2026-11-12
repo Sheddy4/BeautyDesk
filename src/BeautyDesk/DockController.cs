@@ -93,7 +93,7 @@ internal sealed class DockController
                 break;
             case "reorder" when message.TryGetProperty("ids", out var ids) && ids.ValueKind == JsonValueKind.Array:
                 HidePreview();
-                _dock.Reorder(ids.EnumerateArray().Select(e => e.GetString() ?? "").ToList());
+                _dock.Reorder(ids.EnumerateArray().Select(e => e.GetString() ?? "").ToList(), id);
                 break;
         }
     }

@@ -164,11 +164,10 @@ internal sealed class Dock
 
     public void Pin(string itemId)
     {
-        if (IsPinned(itemId) || WindowsOf(itemId).FirstOrDefault() is not { } w) return;
+        if (IsPinned(itemId) || PinFromWindow(itemId) is not { } pin) return;
         var pins = _settings.Dock!;
         // Новая программа встаёт после последней закреплённой программы, перед папками.
-        int index = pins.FindLastIndex(p => p.Kind == "app") + 1;
-        pins.Insert(index, new DockPin { Kind = "app", Path = w.WinFileName ?? "", Aumid = w.IsUWP ? w.AppUserModelID : null, Name = DisplayName(w) });
+        pins.Insert(pins.FindLastIndex(p => p.Kind == "app") + 1, pin);
         _settings.Save();
         Schedule();
     }
@@ -186,14 +185,25 @@ internal sealed class Dock
         foreach (var w in WindowsOf(itemId)) w.Close();
     }
 
-    /// <summary>Новый порядок закреплённых программ после перетаскивания.</summary>
-    public void Reorder(IReadOnlyList<string> itemIds)
+    /// <summary>
+    /// Человек перетащил иконку. <paramref name="itemIds"/> — программы в том порядке, в каком они теперь стоят
+    /// в доке, <paramref name="draggedId"/> — та, которую тянули.
+    /// Незакреплённые программы всегда стоят после закреплённых, поэтому, чтобы порядок остался таким,
+    /// каким его видит человек, закрепляется всё вплоть до перетащенной иконки (и до последней закреплённой).
+    /// </summary>
+    public void Reorder(IReadOnlyList<string> itemIds, string draggedId)
     {
+        var ids = itemIds.Distinct().ToList();
+        int last = Math.Max(ids.FindLastIndex(IsPinned), ids.IndexOf(draggedId));
+        var apps = ids.Take(last + 1)
+            .Select(id => FindPin(id) ?? PinFromWindow(id))
+            .OfType<DockPin>()
+            .ToList();
+
         var pins = _settings.Dock!;
-        var apps = pins.Where(p => p.Kind == "app").ToList();
-        var ordered = itemIds.Select(id => apps.FirstOrDefault(p => "app:" + KeyOf(p) == id)).OfType<DockPin>().Distinct().ToList();
-        ordered.AddRange(apps.Except(ordered)); // на случай, если страница прислала не всё
-        _settings.Dock = [.. ordered, .. pins.Where(p => p.Kind != "app")];
+        // Закреплённые программы, которых страница не прислала (на всякий случай), не теряются.
+        apps.AddRange(pins.Where(p => p.Kind == "app" && !apps.Contains(p)));
+        _settings.Dock = [.. apps, .. pins.Where(p => p.Kind != "app")];
         _settings.Save();
         Schedule();
     }
@@ -223,6 +233,11 @@ internal sealed class Dock
         !string.IsNullOrWhiteSpace(w.WinFileDescription) && !w.IsUWP ? w.WinFileDescription
         : !string.IsNullOrWhiteSpace(w.Title) && w.IsUWP ? w.Title
         : System.IO.Path.GetFileNameWithoutExtension(w.WinFileName ?? "") is { Length: > 0 } file ? file : w.Title ?? "";
+
+    private DockPin? PinFromWindow(string itemId) =>
+        WindowsOf(itemId).FirstOrDefault() is { } w
+            ? new DockPin { Kind = "app", Path = w.WinFileName ?? "", Aumid = w.IsUWP ? w.AppUserModelID : null, Name = DisplayName(w) }
+            : null;
 
     private DockPin? FindPin(string itemId) =>
         _settings.Dock!.FirstOrDefault(p =>

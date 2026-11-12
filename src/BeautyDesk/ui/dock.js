@@ -124,19 +124,21 @@ if (BD.role === 'dock') {
     if (!press) return;
     const el = press.element;
     if (!press.dragging) {
-      // Перетаскивать можно только закреплённые программы; остальные иконки просто нажимаются.
-      if (!el.classList.contains('pinned-app') || Math.abs(event.clientX - press.startX) < DRAG_THRESHOLD) return;
+      // Перетаскивать можно программы; папки и корзина просто нажимаются.
+      if (el.dataset.kind !== 'app' || Math.abs(event.clientX - press.startX) < DRAG_THRESHOLD) return;
       press.dragging = true;
       el.classList.add('dragging');
       BD.send({ type: 'dock', action: 'unhover', id: press.id });
       layout(); // на время перетаскивания увеличение выключается
     }
-    // Иконка встаёт перед первой закреплённой программой, чей центр правее курсора.
-    const others = [...strip.querySelectorAll('.pinned-app')].filter((x) => x !== el);
+    // Иконка встаёт перед первой программой, чей центр правее курсора; если такой нет — в конец программ.
+    const others = appElements().filter((x) => x !== el);
     const next = others.find((x) => { const r = x.getBoundingClientRect(); return event.clientX < r.left + r.width / 2; });
     const before = next ?? (others.length ? others[others.length - 1].nextSibling : el.nextSibling);
     if (before !== el && before !== el.nextSibling) strip.insertBefore(el, before);
   });
+
+  const appElements = () => [...strip.children].filter((x) => x.dataset.kind === 'app');
 
   function endPress(isClick) {
     if (!press) return;
@@ -144,7 +146,7 @@ if (BD.role === 'dock') {
     press = null;
     element.classList.remove('dragging');
     if (wasDragging) {
-      BD.send({ type: 'dock', action: 'reorder', ids: [...strip.querySelectorAll('.pinned-app')].map((x) => x.dataset.id) });
+      BD.send({ type: 'dock', action: 'reorder', id, ids: appElements().map((x) => x.dataset.id) });
       render(); // пока тянули, обновления состава откладывались
     } else if (isClick) {
       BD.send({ type: 'dock', action: 'click', id });
