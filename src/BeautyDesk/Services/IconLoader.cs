@@ -35,8 +35,26 @@ internal static class IconLoader
     private static extern int SHCreateItemFromParsingName(string path, IntPtr context, in Guid id,
         [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory? item);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BITMAPINFOHEADER
+    {
+        public int Size, Width, Height;
+        public ushort Planes, BitCount;
+        public int Compression, SizeImage, XPelsPerMeter, YPelsPerMeter, ClrUsed, ClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DIBSECTION
+    {
+        public BITMAP Bitmap;
+        public BITMAPINFOHEADER Header;
+        public uint Mask0, Mask1, Mask2;
+        public IntPtr Section;
+        public uint Offset;
+    }
+
     [DllImport("gdi32.dll")]
-    private static extern int GetObject(IntPtr handle, int size, out BITMAP bitmap);
+    private static extern int GetObject(IntPtr handle, int size, out DIBSECTION section);
 
     /// <param name="parsingName">Путь к файлу или папке либо имя оболочки вроде shell:AppsFolder\… и shell:RecycleBinFolder.</param>
     public static string? DataUrl(string parsingName, int size = 128)
@@ -50,13 +68,20 @@ internal static class IconLoader
             Marshal.ReleaseComObject(factory);
             if (hr != 0 || handle == IntPtr.Zero) return null;
 
-            if (GetObject(handle, Marshal.SizeOf<BITMAP>(), out var bmp) == 0 || bmp.BitsPixel != 32 || bmp.Bits == IntPtr.Zero)
-                return null;
+            if (GetObject(handle, Marshal.SizeOf<DIBSECTION>(), out var section) == 0) return null;
+            var bmp = section.Bitmap;
+            if (bmp.BitsPixel != 32 || bmp.Bits == IntPtr.Zero) return null;
 
             // Оболочка отдаёт картинку с прозрачностью, но стандартное преобразование WPF её теряет — читаем пиксели сами.
-            var source = BitmapSource.Create(bmp.Width, bmp.Height, 96, 96, PixelFormats.Pbgra32, null,
+            BitmapSource source = BitmapSource.Create(bmp.Width, bmp.Height, 96, 96, PixelFormats.Pbgra32, null,
                 bmp.Bits, bmp.WidthBytes * bmp.Height, bmp.WidthBytes);
             source.Freeze();
+            // Строки картинки могут идти снизу вверх (положительная высота в заголовке) — тогда её нужно перевернуть.
+            if (section.Header.Height > 0)
+            {
+                source = new TransformedBitmap(source, new ScaleTransform(1, -1));
+                source.Freeze();
+            }
             return Encode(source);
         }
         catch (Exception e) when (e is COMException or ArgumentException or IOException or NotSupportedException)
