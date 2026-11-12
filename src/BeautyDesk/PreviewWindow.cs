@@ -21,6 +21,8 @@ internal sealed class PreviewWindow : Window
 
     /// <summary>Человек кликнул по миниатюре.</summary>
     public event Action<IntPtr>? WindowChosen;
+    /// <summary>Человек нажал крестик у миниатюры.</summary>
+    public event Action<IntPtr>? WindowCloseRequested;
     /// <summary>Курсор вошёл в окно превью или вышел из него.</summary>
     public event Action<bool>? HoverChanged;
 
@@ -61,24 +63,36 @@ internal sealed class PreviewWindow : Window
         foreach (var (handle, title) in windows.Take((int)MaxWindows))
         {
             var area = new Border { Width = CellWidth, Height = ThumbHeight };
+            // Крестик стоит в строке заголовка: поверх самой миниатюры Windows рисует картинку окна и закрыла бы его.
+            var close = new Border
+            {
+                Width = 20, Height = 20, CornerRadius = new CornerRadius(4), Background = Brushes.Transparent,
+                Child = new TextBlock
+                {
+                    Text = "\u2715", FontSize = 11, Foreground = Brushes.White,
+                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            close.MouseEnter += (_, _) => close.Background = new SolidColorBrush(Color.FromRgb(0xc4, 0x2b, 0x1c));
+            close.MouseLeave += (_, _) => close.Background = Brushes.Transparent;
+            close.MouseLeftButtonUp += (_, e) => { e.Handled = true; WindowCloseRequested?.Invoke(handle); };
+
+            var header = new DockPanel { Width = CellWidth, Margin = new Thickness(0, 0, 0, 6) };
+            DockPanel.SetDock(close, System.Windows.Controls.Dock.Right);
+            header.Children.Add(close);
+            header.Children.Add(new TextBlock
+            {
+                Text = title, Foreground = Brushes.White, FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
             var cell = new Border
             {
                 Padding = new Thickness(6),
                 Margin = new Thickness(_cells.Children.Count == 0 ? 0 : Gap, 0, 0, 0),
                 CornerRadius = new CornerRadius(6),
                 Background = Brushes.Transparent,
-                Child = new StackPanel
-                {
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text = title, Width = CellWidth, Margin = new Thickness(0, 0, 0, 6),
-                            Foreground = Brushes.White, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis
-                        },
-                        area
-                    }
-                }
+                Child = new StackPanel { Children = { header, area } }
             };
             cell.MouseEnter += (_, _) => cell.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xff, 0xff, 0xff));
             cell.MouseLeave += (_, _) => cell.Background = Brushes.Transparent;
@@ -121,6 +135,13 @@ internal sealed class PreviewWindow : Window
             };
             Native.DwmUpdateThumbnailProperties(thumbnail, ref props);
         }
+    }
+
+    /// <summary>Находится ли курсор над окном превью прямо сейчас.</summary>
+    public bool ContainsCursor()
+    {
+        if (!IsVisible || !Native.GetCursorPos(out var p) || !Native.GetWindowRect(_hwnd, out var r)) return false;
+        return p.X >= r.Left && p.X < r.Right && p.Y >= r.Top && p.Y < r.Bottom;
     }
 
     public void HidePreview()

@@ -22,7 +22,13 @@ internal sealed class DockController
     private readonly Func<string, string> _translate;
     private readonly Action<ShellWindow, Native.RECT, string, List<MenuItem>> _openMenu;
     private (string ItemId, Native.RECT Anchor, MonitorInfo Monitor)? _pendingPreview;
+    private (string ItemId, Native.RECT Anchor, MonitorInfo Monitor)? _shownPreview;
+    private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private string? _menuItemId;
+    private bool _previewShown;
+
+    /// <summary>Превью появилось или исчезло. Пока оно на экране, док не должен прятаться.</summary>
+    public event Action<bool>? PreviewShownChanged;
 
     /// <param name="translate">Перевод строки интерфейса по ключу.</param>
     /// <param name="openMenu">Открыть меню над иконкой: окно дока, место иконки на экране, владелец меню, пункты.</param>
@@ -33,7 +39,24 @@ internal sealed class DockController
         _openMenu = openMenu;
 
         _showTimer.Tick += (_, _) => { _showTimer.Stop(); ShowPendingPreview(); };
-        _hideTimer.Tick += (_, _) => { _hideTimer.Stop(); _preview.HidePreview(); };
+        _hideTimer.Tick += (_, _) =>
+        {
+            _hideTimer.Stop();
+            // Сообщение страницы «курсор ушёл с иконки» может прийти уже после того, как курсор оказался
+            // на превью. Поэтому перед закрытием смотрим, где курсор на самом деле.
+            if (!_preview.ContainsCursor()) HidePreview();
+        };
+        // После закрытия окна крестиком превью перерисовывается: окно исчезает не мгновенно.
+        _refreshTimer.Tick += (_, _) =>
+        {
+            _refreshTimer.Stop();
+            if (_shownPreview is { } shown && _preview.IsVisible) Show(shown);
+        };
+        _preview.WindowCloseRequested += handle =>
+        {
+            _dock.Window(handle.ToInt64().ToString())?.Close();
+            Restart(_refreshTimer);
+        };
         _preview.HoverChanged += inside => { if (inside) _hideTimer.Stop(); else Restart(_hideTimer); };
         _preview.WindowChosen += handle =>
         {
@@ -97,8 +120,11 @@ internal sealed class DockController
     {
         _showTimer.Stop();
         _hideTimer.Stop();
+        _refreshTimer.Stop();
         _pendingPreview = null;
+        _shownPreview = null;
         _preview.HidePreview();
+        SetPreviewShown(false);
     }
 
     public void Close() => _preview.Close();
@@ -128,10 +154,23 @@ internal sealed class DockController
 
     private void ShowPendingPreview()
     {
-        if (_pendingPreview is not { } p) return;
-        var windows = _dock.WindowsOf(p.ItemId).Select(w => (w.Handle, w.Title ?? "")).ToList();
-        if (windows.Count == 0) { _preview.HidePreview(); return; }
-        _preview.ShowFor(windows, p.Anchor, p.Monitor);
+        if (_pendingPreview is { } pending) Show(pending);
+    }
+
+    private void Show((string ItemId, Native.RECT Anchor, MonitorInfo Monitor) target)
+    {
+        var windows = _dock.WindowsOf(target.ItemId).Select(w => (w.Handle, w.Title ?? "")).ToList();
+        if (windows.Count == 0) { HidePreview(); return; }
+        _shownPreview = target;
+        _preview.ShowFor(windows, target.Anchor, target.Monitor);
+        SetPreviewShown(true);
+    }
+
+    private void SetPreviewShown(bool shown)
+    {
+        if (shown == _previewShown) return;
+        _previewShown = shown;
+        PreviewShownChanged?.Invoke(shown);
     }
 
     private static void Restart(DispatcherTimer timer)

@@ -75,6 +75,7 @@ internal sealed class DesktopHost
             key => Strings(_settings.Language).GetValueOrDefault(key, key),
             (window, anchor, owner, items) => OpenMenu(window, anchor, owner, items, above: true));
         _dock.Changed += PublishDock;
+        _dockController.PreviewShownChanged += shown => Publish("dockHold", new { value = shown });
         _tray = new TrayIcons(_shell.NotificationArea);
         _tray.Changed += () => Publish("tray", _tray.Snapshot());
         _system.Changed += () => Publish("sys", _system.Current);
@@ -199,6 +200,7 @@ internal sealed class DesktopHost
         ShellState.KeepHidden(!_settings.ShowDesktopIcons);
         _system.Refresh();
         if (_tick++ % 6 == 0) _dock?.RefreshTrash();
+        ReportPointer();
 
         var (fullscreen, maximized) = ForegroundCoverage();
         if (fullscreen == _fullscreenMonitor && maximized == _maximizedMonitor) return;
@@ -207,6 +209,21 @@ internal sealed class DesktopHost
         UpdateVisibility();
         // Страницы останавливают анимации при полноэкранном приложении, а док прячется при развёрнутом окне.
         Broadcast();
+    }
+
+    /// <summary>
+    /// Сообщает страницам дока, где сейчас курсор (в их координатах). Событие «курсор ушёл» в браузере
+    /// иногда теряется, когда окно меняет форму; по этим данным страница замечает, что курсора уже нет.
+    /// </summary>
+    private void ReportPointer()
+    {
+        Native.GetCursorPos(out var cursor);
+        foreach (var w in _windows.Where(w => w.Role == ShellRole.Dock && w.IsVisible))
+        {
+            var b = w.Bounds;
+            double x = (cursor.X - b.Left) / w.Monitor.Scale, y = (cursor.Y - b.Top) / w.Monitor.Scale;
+            w.Post(JsonSerializer.Serialize(new { type = "pointer", data = new { x, y } }, Json));
+        }
     }
 
     private void UpdateVisibility()
@@ -248,7 +265,7 @@ internal sealed class DesktopHost
     private static ShellRole RoleFor(string topic) => topic switch
     {
         "media" => ShellRole.Island,
-        "dock" or "dockIcons" => ShellRole.Dock,
+        "dock" or "dockIcons" or "dockHold" => ShellRole.Dock,
         "menu" => ShellRole.Menu,
         _ => ShellRole.Bar
     };
