@@ -40,6 +40,33 @@ if (BD.role === 'dock') {
     return { left, width, centers };
   }
 
+  /** Место иконки в состоянии покоя. Меню и превью привязываются к нему, а не к увеличенной под курсором иконке. */
+  function restRect(el) {
+    const index = [...strip.children].indexOf(el);
+    const size = baseSize();
+    const top = window.innerHeight - dockMargin() - dockHeight();
+    return { x: restGeometry().centers[index] - size / 2, y: top, width: size, height: dockHeight() };
+  }
+
+  /** Сообщает программе цвета и шрифт темы — ими красится окно превью, которое рисует не страница. */
+  function reportTheme() {
+    const style = getComputedStyle(document.documentElement);
+    const probe = document.createElement('span');
+    document.body.appendChild(probe);
+    const color = (name) => {
+      probe.style.color = style.getPropertyValue(name).trim();
+      return (getComputedStyle(probe).color.match(/[\d.]+/g) ?? [0, 0, 0]).slice(0, 3).map(Number);
+    };
+    BD.send({
+      type: 'themeColors',
+      background: color('--bd-menu-bg'),
+      foreground: color('--bd-fg'),
+      font: style.getPropertyValue('--bd-font').replaceAll('"', '').trim(),
+    });
+    probe.remove();
+  }
+  document.getElementById('theme').addEventListener('load', reportTheme);
+
   function layout() {
     const size = baseSize();
     const { centers } = restGeometry();
@@ -105,9 +132,9 @@ if (BD.role === 'dock') {
     el.appendChild(img);
 
     const id = item.id;
-    el.addEventListener('contextmenu', () => BD.send({ type: 'dock', action: 'menu', id, rect: BD.rect(img) }));
+    el.addEventListener('contextmenu', () => BD.send({ type: 'dock', action: 'menu', id, rect: restRect(el) }));
     el.addEventListener('mouseenter', () => {
-      if (!press && el.classList.contains('running')) BD.send({ type: 'dock', action: 'hover', id, rect: BD.rect(img) });
+      if (!press && el.classList.contains('running')) BD.send({ type: 'dock', action: 'hover', id, rect: restRect(el) });
     });
     el.addEventListener('mouseleave', () => BD.send({ type: 'dock', action: 'unhover', id }));
     el.addEventListener('pointerdown', (event) => {

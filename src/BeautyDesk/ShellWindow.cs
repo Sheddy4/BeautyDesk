@@ -185,6 +185,9 @@ internal sealed class ShellWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        // Окно попало на экран с другим масштабом: Windows при этом сама пересчитывает его размер.
+        // Наши размеры уже посчитаны под нужный экран, поэтому возвращаем их на место.
+        if (msg == Native.WM_DPICHANGED) Dispatcher.BeginInvoke(() => SetBounds(_bounds));
         if (Role != ShellRole.Bar) return IntPtr.Zero;
         if ((uint)msg == AppBarCallback && wParam.ToInt32() == Native.ABN_POSCHANGED)
         {

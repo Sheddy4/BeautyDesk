@@ -4,6 +4,13 @@ if (BD.role === 'menu') {
 
   BD.on('menu', (data) => {
     menu.replaceChildren();
+    // Скрытые иконки трея приходят вместо обычных пунктов и раскладываются сеткой.
+    menu.classList.toggle('tray-grid', Boolean(data.tray));
+    if (data.tray) {
+      menu.style.setProperty('--columns', data.columns);
+      for (const item of data.tray) menu.appendChild(BD.trayIcon(item));
+      return;
+    }
     for (const item of data.items) {
       if (item.separator) {
         menu.appendChild(document.createElement('hr'));

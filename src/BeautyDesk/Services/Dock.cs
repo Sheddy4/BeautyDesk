@@ -37,6 +37,7 @@ internal sealed class Dock
     private readonly Settings _settings;
     private readonly Dictionary<string, string> _icons = [];
     private readonly HashSet<ApplicationWindow> _tracked = [];
+    private readonly Dictionary<IntPtr, WindowIdentity.Info> _identities = [];
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private bool _trashFull;
 
@@ -71,6 +72,7 @@ internal sealed class Dock
         foreach (var w in windows)
             if (_tracked.Add(w)) w.PropertyChanged += OnWindowChanged;
         _tracked.RemoveWhere(w => !windows.Contains(w));
+        foreach (var gone in _identities.Keys.Where(h => windows.All(w => w.Handle != h)).ToList()) _identities.Remove(gone);
 
         var byApp = windows.GroupBy(KeyOf).ToDictionary(g => g.Key, g => g.ToList());
         var items = new List<Item>();
@@ -98,7 +100,7 @@ internal sealed class Dock
         foreach (var (key, own) in byApp)
         {
             var first = own[0];
-            items.Add(AppItem(key, DisplayName(first), false, ParsingName(first.IsUWP ? first.AppUserModelID : null, first.WinFileName), own));
+            items.Add(AppItem(key, DisplayName(first), false, ParsingName(first.IsUWP ? first.AppUserModelID : null, ProgramPath(first)), own));
         }
 
         items.Add(new Item("separator", "separator", "", null, false, false, false, []));
@@ -159,7 +161,7 @@ internal sealed class Dock
         }
         // Незакреплённая программа: запускаем ещё один экземпляр того же, что уже работает.
         if (WindowsOf(itemId).FirstOrDefault() is { } w)
-            Open(ParsingName(w.IsUWP ? w.AppUserModelID : null, w.WinFileName));
+            Open(ParsingName(w.IsUWP ? w.AppUserModelID : null, ProgramPath(w)));
     }
 
     public void Pin(string itemId)
@@ -219,9 +221,19 @@ internal sealed class Dock
     private IEnumerable<ApplicationWindow> Windows() => _tasks.GroupedWindows.Cast<ApplicationWindow>();
 
     /// <summary>Окна одной программы собираются в одну иконку по этому ключу.</summary>
-    private static string KeyOf(ApplicationWindow w) =>
+    private string KeyOf(ApplicationWindow w) =>
         w.IsUWP && !string.IsNullOrEmpty(w.AppUserModelID) ? "aumid:" + w.AppUserModelID.ToLowerInvariant()
-        : "path:" + (w.WinFileName ?? "").ToLowerInvariant();
+        : "path:" + ProgramPath(w).ToLowerInvariant();
+
+    private WindowIdentity.Info Identity(ApplicationWindow w)
+    {
+        if (!_identities.TryGetValue(w.Handle, out var info))
+            _identities[w.Handle] = info = WindowIdentity.Read(w.Handle);
+        return info;
+    }
+
+    /// <summary>Программа, которой принадлежит окно: из «паспорта» окна, а если его нет — сам процесс окна.</summary>
+    private string ProgramPath(ApplicationWindow w) => Identity(w).Path ?? w.WinFileName ?? "";
 
     private static string KeyOf(DockPin pin) =>
         !string.IsNullOrEmpty(pin.Aumid) ? "aumid:" + pin.Aumid.ToLowerInvariant() : "path:" + pin.Path.ToLowerInvariant();
@@ -229,14 +241,24 @@ internal sealed class Dock
     private static string ParsingName(string? aumid, string? path) =>
         !string.IsNullOrEmpty(aumid) ? @"shell:AppsFolder\" + aumid : path ?? "";
 
-    private static string DisplayName(ApplicationWindow w) =>
-        !string.IsNullOrWhiteSpace(w.WinFileDescription) && !w.IsUWP ? w.WinFileDescription
-        : !string.IsNullOrWhiteSpace(w.Title) && w.IsUWP ? w.Title
-        : System.IO.Path.GetFileNameWithoutExtension(w.WinFileName ?? "") is { Length: > 0 } file ? file : w.Title ?? "";
+    private string DisplayName(ApplicationWindow w)
+    {
+        if (w.IsUWP && !string.IsNullOrWhiteSpace(w.Title)) return w.Title;
+        var identity = Identity(w);
+        if (!string.IsNullOrWhiteSpace(identity.Name)) return identity.Name;
+        var path = ProgramPath(w);
+        try
+        {
+            if (File.Exists(path) && FileVersionInfo.GetVersionInfo(path).FileDescription is { Length: > 0 } description)
+                return description;
+        }
+        catch (IOException) { }
+        return System.IO.Path.GetFileNameWithoutExtension(path) is { Length: > 0 } file ? file : w.Title ?? "";
+    }
 
     private DockPin? PinFromWindow(string itemId) =>
         WindowsOf(itemId).FirstOrDefault() is { } w
-            ? new DockPin { Kind = "app", Path = w.WinFileName ?? "", Aumid = w.IsUWP ? w.AppUserModelID : null, Name = DisplayName(w) }
+            ? new DockPin { Kind = "app", Path = ProgramPath(w), Aumid = w.IsUWP ? w.AppUserModelID : null, Name = DisplayName(w) }
             : null;
 
     private DockPin? FindPin(string itemId) =>

@@ -19,7 +19,7 @@ internal static class Native
 
     public const uint SPI_SETDESKWALLPAPER = 0x14, SPI_GETDESKWALLPAPER = 0x73, SPIF_SENDCHANGE = 0x2;
 
-    public const int WM_HOTKEY = 0x312;
+    public const int WM_HOTKEY = 0x312, WM_DPICHANGED = 0x2E0;
     public const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_NOREPEAT = 0x4000;
 
     public const uint DWM_BB_ENABLE = 1, DWM_BB_BLURREGION = 2;

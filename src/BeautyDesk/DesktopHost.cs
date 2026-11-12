@@ -26,6 +26,8 @@ internal sealed class DesktopHost
     // Окно дока выше самого дока: в запас помещаются увеличенные под курсором иконки.
     private const double DockWindowHeightFactor = 2.4;
     private const double MenuWideWidth = 300;
+    private const int TrayGridColumns = 5;
+    private const double TrayGridCell = 34;
     private const double MenuWidth = 240, MenuItemHeight = 30, MenuSeparatorHeight = 9, MenuPadding = 14, MenuGap = 4;
 
     // Окна самой Windows, которые занимают весь экран, но полноэкранным приложением не являются.
@@ -333,6 +335,19 @@ internal sealed class DesktopHost
             case "tray" when message.TryGetProperty("rect", out var rect):
                 if (Text(message, "kind") == "down") window.TakeForeground();
                 _tray?.Mouse(Number(message, "id"), Text(message, "kind") ?? "", Text(message, "button"), ToScreen(window, rect));
+                // Иконка из скрытого раздела нажата — сам раздел больше не нужен.
+                if (window.Role == ShellRole.Menu && Text(message, "kind") == "up") CloseMenu();
+                break;
+
+            case "trayOverflow" when message.TryGetProperty("rect", out var more) && message.TryGetProperty("ids", out var hidden) && _tray is not null:
+            {
+                var ids = hidden.EnumerateArray().Select(e => e.TryGetInt32(out var n) ? n : 0).ToHashSet();
+                OpenTrayOverflow(window, ToScreen(window, more), _tray.Snapshot().Where(i => ids.Contains(i.Id)).ToList());
+                break;
+            }
+
+            case "themeColors" when window.Role == ShellRole.Dock:
+                _dockController?.ApplyTheme(ColorOf(message, "background"), ColorOf(message, "foreground"), Text(message, "font") ?? "");
                 break;
 
             case "dock":
@@ -382,6 +397,16 @@ internal sealed class DesktopHost
         }
     }
 
+    /// <summary>Цвет, присланный страницей как [красный, зелёный, синий] по 0–255.</summary>
+    private static System.Windows.Media.Color ColorOf(JsonElement message, string name)
+    {
+        byte Part(JsonElement array, int index) =>
+            array.GetArrayLength() > index && array[index].TryGetDouble(out var v) ? (byte)Math.Clamp(Math.Round(v), 0, 255) : (byte)0;
+        return message.TryGetProperty(name, out var c) && c.ValueKind == JsonValueKind.Array
+            ? System.Windows.Media.Color.FromRgb(Part(c, 0), Part(c, 1), Part(c, 2))
+            : System.Windows.Media.Colors.Black;
+    }
+
     private static string? Text(JsonElement message, string name) =>
         message.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
@@ -426,21 +451,36 @@ internal sealed class DesktopHost
     private void ToggleSystemMenu(ShellWindow from, Native.RECT anchor) =>
         OpenMenu(from, anchor, "system", SystemMenuItems(), above: false);
 
-    /// <summary>
-    /// Открывает меню у указанного места экрана. Повторный вызов с тем же владельцем закрывает его —
-    /// так кнопка меню работает как переключатель.
-    /// </summary>
     private void OpenMenu(ShellWindow from, Native.RECT anchor, string owner, List<MenuItem> items, bool above)
+    {
+        if (items.Count == 0) { CloseMenu(); return; }
+        double height = MenuPadding + items.Sum(i => i.Separator ? MenuSeparatorHeight : MenuItemHeight);
+        OpenPopup(from, anchor, owner, new { items }, above ? MenuWideWidth : MenuWidth, height, above);
+    }
+
+    /// <summary>Скрытые иконки трея: сетка иконок под стрелочкой.</summary>
+    private void OpenTrayOverflow(ShellWindow from, Native.RECT anchor, IReadOnlyList<TrayIcons.Item> icons)
+    {
+        if (icons.Count == 0) { CloseMenu(); return; }
+        int columns = Math.Min(icons.Count, TrayGridColumns);
+        int rows = (icons.Count + columns - 1) / columns;
+        OpenPopup(from, anchor, "tray", new { tray = icons, columns },
+            columns * TrayGridCell + MenuPadding, rows * TrayGridCell + MenuPadding, above: false);
+    }
+
+    /// <summary>
+    /// Открывает всплывающее окно у указанного места экрана. Повторный вызов с тем же владельцем закрывает его —
+    /// так кнопка работает как переключатель. Размеры — в единицах, не зависящих от масштаба.
+    /// </summary>
+    private void OpenPopup(ShellWindow from, Native.RECT anchor, string owner, object content, double widthUnits, double heightUnits, bool above)
     {
         if (_menu is null) return;
         bool sameOwner = _menu.IsVisible && _menuOwner == owner;
         CloseMenu();
-        if (sameOwner || items.Count == 0) return;
+        if (sameOwner) return;
 
         var monitor = from.Monitor;
-        int width = Px(monitor, above ? MenuWideWidth : MenuWidth);
-        int height = Px(monitor, MenuPadding + items.Sum(i => i.Separator ? MenuSeparatorHeight : MenuItemHeight));
-        int gap = Px(monitor, MenuGap);
+        int width = Px(monitor, widthUnits), height = Px(monitor, heightUnits), gap = Px(monitor, MenuGap);
         // Меню панели выпадает вниз от кнопки, меню дока поднимается над иконкой по её центру.
         int left = above ? anchor.Left + anchor.Width / 2 - width / 2 : anchor.Left;
         left = Math.Clamp(left, monitor.Bounds.Left + gap, Math.Max(monitor.Bounds.Left + gap, monitor.Bounds.Right - width - gap));
@@ -451,8 +491,8 @@ internal sealed class DesktopHost
         _menu.Monitor = monitor;
         _menu.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
         _menu.Post(StateJson(_menu));
-        _topics.Remove("menu"); // меню открывается заново — отправляем пункты, даже если они не изменились
-        Publish("menu", new { items });
+        _topics.Remove("menu"); // окно открывается заново — отправляем содержимое, даже если оно не изменилось
+        Publish("menu", content);
         _menu.SetShown(true);
         _menu.Raise();
         WatchOutsideClicks(true);

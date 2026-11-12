@@ -19,6 +19,27 @@ const BD = {
     return { x: r.left, y: r.top, width: r.width, height: r.height };
   },
 
+  /**
+   * Иконка трея: картинка, которая пересылает программе всё, что с ней делает мышь.
+   * Используется и на панели, и в скрытом разделе под стрелочкой.
+   */
+  trayIcon(item) {
+    const img = document.createElement('img');
+    img.className = 'tray-icon';
+    img.draggable = false;
+    const buttons = ['left', 'middle', 'right'];
+    for (const [event, kind] of [['mouseenter', 'enter'], ['mouseleave', 'leave'], ['mousedown', 'down'], ['mouseup', 'up']]) {
+      img.addEventListener(event, (e) => BD.send({ type: 'tray', id: item.id, kind, button: buttons[e.button ?? 0], rect: BD.rect(img) }));
+    }
+    BD.updateTrayIcon(img, item);
+    return img;
+  },
+
+  updateTrayIcon(img, item) {
+    if (item.icon && img.getAttribute('src') !== item.icon) img.setAttribute('src', item.icon);
+    if (img.title !== item.title) img.title = item.title;
+  },
+
   start() {
     chrome.webview.addEventListener('message', (event) => {
       const message = event.data;

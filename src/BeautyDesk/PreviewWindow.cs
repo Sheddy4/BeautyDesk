@@ -18,6 +18,8 @@ internal sealed class PreviewWindow : Window
     private readonly StackPanel _cells = new() { Orientation = Orientation.Horizontal };
     private readonly List<IntPtr> _thumbnails = [];
     private IntPtr _hwnd;
+    private Brush _foreground = Brushes.White;
+    private Brush _hover = new SolidColorBrush(Color.FromArgb(0x30, 0xff, 0xff, 0xff));
 
     /// <summary>Человек кликнул по миниатюре.</summary>
     public event Action<IntPtr>? WindowChosen;
@@ -40,6 +42,15 @@ internal sealed class PreviewWindow : Window
 
         MouseEnter += (_, _) => HoverChanged?.Invoke(true);
         MouseLeave += (_, _) => HoverChanged?.Invoke(false);
+    }
+
+    /// <summary>Перекрашивает превью под текущую тему: фон, цвет текста и шрифт берутся со страницы дока.</summary>
+    public void ApplyTheme(Color background, Color foreground, string fontFamily)
+    {
+        Background = new SolidColorBrush(Color.FromRgb(background.R, background.G, background.B));
+        _foreground = new SolidColorBrush(Color.FromRgb(foreground.R, foreground.G, foreground.B));
+        _hover = new SolidColorBrush(Color.FromArgb(0x30, foreground.R, foreground.G, foreground.B));
+        if (!string.IsNullOrWhiteSpace(fontFamily)) FontFamily = new FontFamily(fontFamily);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -69,7 +80,7 @@ internal sealed class PreviewWindow : Window
                 Width = 20, Height = 20, CornerRadius = new CornerRadius(4), Background = Brushes.Transparent,
                 Child = new TextBlock
                 {
-                    Text = "\u2715", FontSize = 11, Foreground = Brushes.White,
+                    Text = "\u2715", FontSize = 11, Foreground = _foreground,
                     HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
                 }
             };
@@ -82,7 +93,7 @@ internal sealed class PreviewWindow : Window
             header.Children.Add(close);
             header.Children.Add(new TextBlock
             {
-                Text = title, Foreground = Brushes.White, FontSize = 12,
+                Text = title, Foreground = _foreground, FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis
             });
 
@@ -94,7 +105,7 @@ internal sealed class PreviewWindow : Window
                 Background = Brushes.Transparent,
                 Child = new StackPanel { Children = { header, area } }
             };
-            cell.MouseEnter += (_, _) => cell.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xff, 0xff, 0xff));
+            cell.MouseEnter += (_, _) => cell.Background = _hover;
             cell.MouseLeave += (_, _) => cell.Background = Brushes.Transparent;
             cell.MouseLeftButtonUp += (_, e) => { e.Handled = true; WindowChosen?.Invoke(handle); };
             _cells.Children.Add(cell);
@@ -106,6 +117,9 @@ internal sealed class PreviewWindow : Window
         new WindowInteropHelper(this).EnsureHandle();
         Native.SetWindowPos(_hwnd, IntPtr.Zero, anchor.Left, anchor.Top - 200, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_NOZORDER);
         Show();
+        UpdateLayout();
+        // На экране с другим масштабом размеры пересчитываются не сразу — даём окну это сделать.
+        Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
         UpdateLayout();
 
         Native.GetWindowRect(_hwnd, out var size);

@@ -129,6 +129,9 @@ internal sealed class DockController
 
     public void Close() => _preview.Close();
 
+    public void ApplyTheme(System.Windows.Media.Color background, System.Windows.Media.Color foreground, string fontFamily) =>
+        _preview.ApplyTheme(background, foreground, fontFamily);
+
     private List<MenuItem> MenuFor(string itemId)
     {
         var items = new List<MenuItem>();

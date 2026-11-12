@@ -51,40 +51,47 @@ if (BD.role === 'bar') {
   // ---------- трей ----------
 
   const trayElements = new Map(); // id иконки -> её элемент
-  const buttons = ['left', 'middle', 'right'];
-
-  function trayMessage(id, element, kind, event) {
-    BD.send({ type: 'tray', id, kind, button: buttons[event?.button ?? 0], rect: BD.rect(element) });
-  }
+  const TRAY_SLOT = 26;           // ширина одной иконки вместе с промежутком, как в base.css
+  let trayItems = [];
+  let trayHidden = [];            // id иконок, которым не хватило места
 
   function renderTray(items) {
+    trayItems = items;
     const tray = $('tray');
     const seen = new Set();
     for (const item of items) {
       seen.add(item.id);
       let img = trayElements.get(item.id);
-      if (!img) {
-        // Элемент живёт, пока жива иконка: так наведение и нажатие не сбиваются при обновлении списка.
-        img = document.createElement('img');
-        img.className = 'tray-icon';
-        img.draggable = false;
-        img.addEventListener('mouseenter', (e) => trayMessage(item.id, img, 'enter', e));
-        img.addEventListener('mouseleave', (e) => trayMessage(item.id, img, 'leave', e));
-        img.addEventListener('mousedown', (e) => trayMessage(item.id, img, 'down', e));
-        img.addEventListener('mouseup', (e) => trayMessage(item.id, img, 'up', e));
-        trayElements.set(item.id, img);
-      }
-      if (item.icon && img.getAttribute('src') !== item.icon) img.setAttribute('src', item.icon);
-      if (img.title !== item.title) img.title = item.title;
+      // Элемент живёт, пока жива иконка: так наведение и нажатие не сбиваются при обновлении списка.
+      if (!img) trayElements.set(item.id, img = BD.trayIcon(item));
+      else BD.updateTrayIcon(img, item);
       tray.appendChild(img); // заодно ставит в нужном порядке
     }
     for (const [id, img] of trayElements) {
       if (!seen.has(id)) { img.remove(); trayElements.delete(id); }
     }
+    fitTray();
+  }
+
+  /** Иконки, которым не хватает места перед «островом», уходят в скрытый раздел под стрелочкой. */
+  function fitTray() {
+    const tray = $('tray'), more = $('tray-more');
+    for (const img of trayElements.values()) img.hidden = false;
+    more.hidden = true;
+    const needed = trayItems.length * TRAY_SLOT;
+    trayHidden = [];
+    if (needed > tray.clientWidth + 1) {
+      more.hidden = false; // стрелочка сама занимает место — сколько осталось, меряем уже с ней
+      const fits = Math.max(0, Math.floor(tray.clientWidth / TRAY_SLOT));
+      trayHidden = trayItems.slice(0, trayItems.length - fits).map((item) => item.id);
+      for (const id of trayHidden) trayElements.get(id).hidden = true;
+    }
   }
 
   // ---------- действия ----------
 
+  $('tray-more').addEventListener('click', () => BD.send({ type: 'trayOverflow', rect: BD.rect($('tray-more')), ids: trayHidden }));
+  window.addEventListener('resize', fitTray);
   $('sys-button').addEventListener('click', () => BD.send({ type: 'openMenu', rect: BD.rect($('sys-button')) }));
   $('quick').addEventListener('click', () => BD.send({ type: 'open', target: 'quick' }));
   $('clock').addEventListener('click', () => BD.send({ type: 'open', target: 'notifications' }));
