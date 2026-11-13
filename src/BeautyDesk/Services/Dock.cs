@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Windows.Threading;
 using ManagedShell.WindowsTasks;
 
@@ -35,8 +36,9 @@ internal sealed class Dock
 
     private readonly Tasks _tasks;
     private readonly Settings _settings;
+    private readonly Func<string, string?> _findPackagedApp;
     private readonly Dictionary<string, string> _icons = [];
-    private readonly HashSet<string> _noIcon = []; // программы, для которых иконку получить не удалось, — повторно не пробуем
+    private readonly HashSet<string> _noFileIcon = []; // программы, у которых иконку из файла прочитать не удалось, — повторно не пробуем
     private readonly HashSet<ApplicationWindow> _tracked = [];
     private readonly Dictionary<IntPtr, WindowIdentity.Info> _identities = [];
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
@@ -50,15 +52,22 @@ internal sealed class Dock
     /// <summary>Увеличивается при каждом изменении <see cref="Icons"/> — чтобы не пересылать их зря.</summary>
     public int IconsVersion { get; private set; }
 
-    public Dock(Tasks tasks, Settings settings)
+    /// <param name="findPackagedApp">По имени пакета приложения из Магазина возвращает его полное имя
+    /// в папке «Приложения» (или null, если список программ ещё не прочитан).</param>
+    public Dock(Tasks tasks, Settings settings, Func<string, string?> findPackagedApp)
     {
         _tasks = tasks;
         _settings = settings;
+        _findPackagedApp = findPackagedApp;
         if (_settings.Dock is null)
         {
             _settings.Dock = DefaultPins();
             _settings.Save();
         }
+
+        // Закрепления обычных программ, которые ведут в никуда (программу удалили), убираются.
+        if (_settings.Dock.RemoveAll(p => p.Kind == "app" && PackageOf(p) is null && !File.Exists(p.Path)) > 0)
+            _settings.Save();
 
         _debounce.Tick += (_, _) => { _debounce.Stop(); Changed?.Invoke(); };
         ((INotifyCollectionChanged)_tasks.GroupedWindows).CollectionChanged += (_, _) => Schedule();
@@ -81,13 +90,18 @@ internal sealed class Dock
         Item AppItem(string key, string title, bool pinned, string parsingName, List<ApplicationWindow>? own)
         {
             own ??= [];
-            if (!_icons.ContainsKey(key) && !_noIcon.Contains(key))
+            if (!_icons.ContainsKey(key))
             {
                 // Иконку из файла программы прочитать удаётся не всегда (например, у приложений из Магазина путь закрыт) —
-                // тогда берём ту, что даёт само окно.
-                var icon = IconLoader.DataUrl(parsingName) ?? IconLoader.Encode(own.FirstOrDefault()?.Icon);
+                // тогда берём ту, что даёт само окно; она может появиться позже, вместе с окном.
+                string? icon = _noFileIcon.Contains(key) ? null : IconLoader.DataUrl(parsingName);
+                if (icon is null)
+                {
+                    // Для приложения из Магазина неудача может быть временной: список программ ещё читается.
+                    if (!key.StartsWith("pkg:") || parsingName.StartsWith("shell:")) _noFileIcon.Add(key);
+                    icon = IconLoader.Encode(own.FirstOrDefault()?.Icon);
+                }
                 if (icon is not null) SetIcon(key, icon);
-                else _noIcon.Add(key);
             }
             return new Item("app:" + key, "app", title, _icons.ContainsKey(key) ? key : null, pinned, own.Count > 0,
                 own.Any(w => w.State == ApplicationWindow.WindowState.Active),
@@ -99,12 +113,12 @@ internal sealed class Dock
         {
             var key = KeyOf(pin);
             byApp.Remove(key, out var own);
-            items.Add(AppItem(key, pin.Name, true, ParsingName(pin.Aumid, pin.Path), own));
+            items.Add(AppItem(key, pin.Name, true, ParsingName(AumidOf(pin), pin.Path), own));
         }
         foreach (var (key, own) in byApp)
         {
             var first = own[0];
-            items.Add(AppItem(key, DisplayName(first), false, ParsingName(first.IsUWP ? first.AppUserModelID : null, ProgramPath(first)), own));
+            items.Add(AppItem(key, DisplayName(first), false, ParsingName(AumidOf(first), ProgramPath(first)), own));
         }
 
         items.Add(new Item("separator", "separator", "", null, false, false, false, []));
@@ -160,12 +174,12 @@ internal sealed class Dock
         if (itemId == TrashId) { Open(TrashShellName); return; }
         if (FindPin(itemId) is { } pin)
         {
-            Open(pin.Kind == "app" ? ParsingName(pin.Aumid, pin.Path) : pin.Path);
+            Open(pin.Kind == "app" ? ParsingName(AumidOf(pin), pin.Path) : pin.Path);
             return;
         }
         // Незакреплённая программа: запускаем ещё один экземпляр того же, что уже работает.
         if (WindowsOf(itemId).FirstOrDefault() is { } w)
-            Open(ParsingName(w.IsUWP ? w.AppUserModelID : null, ProgramPath(w)));
+            Open(ParsingName(AumidOf(w), ProgramPath(w)));
     }
 
     public void Pin(string itemId)
@@ -224,10 +238,36 @@ internal sealed class Dock
 
     private IEnumerable<ApplicationWindow> Windows() => _tasks.GroupedWindows.Cast<ApplicationWindow>();
 
+    // Путь приложения из Магазина: ...\WindowsApps\Имя_версия_архитектура_ресурс_издатель\...
+    private static readonly Regex PackagedPath = new(@"[/\\]WindowsApps[/\\]([^_/\\]+)_[^_/\\]*_[^_/\\]*_[^_/\\]*_([^/\\]+)[/\\]", RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Имя пакета приложения из Магазина («Имя_издатель») или null для обычной программы.
+    /// В пути к файлу такого приложения записан номер версии, поэтому после обновления путь меняется —
+    /// узнавать приложение нужно по имени пакета.
+    /// </summary>
+    private static string? PackageOf(string? aumid, string? path)
+    {
+        if (!string.IsNullOrEmpty(aumid) && aumid.Contains('!')) return aumid[..aumid.IndexOf('!')];
+        var match = PackagedPath.Match(path ?? "");
+        return match.Success ? $"{match.Groups[1].Value}_{match.Groups[2].Value}" : null;
+    }
+
+    private static string? PackageOf(DockPin pin) => PackageOf(pin.Aumid, pin.Path);
+    private static string? PackageOf(ApplicationWindow w) => PackageOf(w.AppUserModelID, w.WinFileName);
+
     /// <summary>Окна одной программы собираются в одну иконку по этому ключу.</summary>
     private string KeyOf(ApplicationWindow w) =>
-        w.IsUWP && !string.IsNullOrEmpty(w.AppUserModelID) ? "aumid:" + w.AppUserModelID.ToLowerInvariant()
-        : "path:" + ProgramPath(w).ToLowerInvariant();
+        PackageOf(w) is { } package ? "pkg:" + package.ToLowerInvariant() : "path:" + ProgramPath(w).ToLowerInvariant();
+
+    /// <summary>Полное имя приложения из Магазина в папке «Приложения»: по нему оно запускается и получает иконку.</summary>
+    private string? AumidOf(ApplicationWindow w) =>
+        PackageOf(w) is not { } package ? null
+        : !string.IsNullOrEmpty(w.AppUserModelID) && w.AppUserModelID.Contains('!') ? w.AppUserModelID
+        : _findPackagedApp(package);
+
+    private string? AumidOf(DockPin pin) =>
+        !string.IsNullOrEmpty(pin.Aumid) ? pin.Aumid : PackageOf(pin) is { } package ? _findPackagedApp(package) : null;
 
     private WindowIdentity.Info Identity(ApplicationWindow w)
     {
@@ -240,7 +280,7 @@ internal sealed class Dock
     private string ProgramPath(ApplicationWindow w) => Identity(w).Path ?? w.WinFileName ?? "";
 
     private static string KeyOf(DockPin pin) =>
-        !string.IsNullOrEmpty(pin.Aumid) ? "aumid:" + pin.Aumid.ToLowerInvariant() : "path:" + pin.Path.ToLowerInvariant();
+        PackageOf(pin) is { } package ? "pkg:" + package.ToLowerInvariant() : "path:" + pin.Path.ToLowerInvariant();
 
     private static string ParsingName(string? aumid, string? path) =>
         !string.IsNullOrEmpty(aumid) ? @"shell:AppsFolder\" + aumid : path ?? "";
@@ -262,7 +302,7 @@ internal sealed class Dock
 
     private DockPin? PinFromWindow(string itemId) =>
         WindowsOf(itemId).FirstOrDefault() is { } w
-            ? new DockPin { Kind = "app", Path = ProgramPath(w), Aumid = w.IsUWP ? w.AppUserModelID : null, Name = DisplayName(w) }
+            ? new DockPin { Kind = "app", Path = ProgramPath(w), Aumid = AumidOf(w), Name = DisplayName(w) }
             : null;
 
     private DockPin? FindPin(string itemId) =>
@@ -277,7 +317,7 @@ internal sealed class Dock
 
     private void OnWindowChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ApplicationWindow.Title) or nameof(ApplicationWindow.State) or nameof(ApplicationWindow.ShowInTaskbar))
+        if (e.PropertyName is nameof(ApplicationWindow.Title) or nameof(ApplicationWindow.State) or nameof(ApplicationWindow.ShowInTaskbar) or nameof(ApplicationWindow.Icon))
             Schedule();
     }
 

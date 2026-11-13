@@ -18,6 +18,7 @@ internal sealed class PreviewWindow : Window
     private readonly StackPanel _cells = new() { Orientation = Orientation.Horizontal };
     private readonly List<IntPtr> _thumbnails = [];
     private IntPtr _hwnd;
+    private int _generation; // номер последнего показа: по нему отложенная работа узнаёт, что устарела
     private Brush _foreground = Brushes.White;
     private Brush _hover = new SolidColorBrush(Color.FromArgb(0x30, 0xff, 0xff, 0xff));
 
@@ -118,18 +119,36 @@ internal sealed class PreviewWindow : Window
         Native.SetWindowPos(_hwnd, IntPtr.Zero, anchor.Left, anchor.Top - 200, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_NOZORDER);
         Show();
         UpdateLayout();
-        // На экране с другим масштабом размеры пересчитываются не сразу — даём окну это сделать.
-        Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-        UpdateLayout();
+        Place(anchor, monitor);
 
+        // На экране с другим масштабом окно пересчитывает размеры не сразу, поэтому миниатюры расставляются
+        // чуть позже. За это время человек может навестись на другую иконку — тогда этот показ уже устарел.
+        int generation = ++_generation;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            if (generation != _generation || !IsVisible) return;
+            UpdateLayout();
+            Place(anchor, monitor);
+            ShowThumbnails(areas);
+        });
+    }
+
+    /// <summary>Ставит окно над иконкой по центру, не выпуская за края экрана.</summary>
+    private void Place(Native.RECT anchor, MonitorInfo monitor)
+    {
         Native.GetWindowRect(_hwnd, out var size);
         int gap = (int)Math.Round(10 * monitor.Scale);
         int left = Math.Clamp(anchor.Left + anchor.Width / 2 - size.Width / 2, monitor.Bounds.Left + gap, Math.Max(monitor.Bounds.Left + gap, monitor.Bounds.Right - size.Width - gap));
         Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, left, anchor.Top - size.Height - gap, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+    }
 
+    private void ShowThumbnails(List<(IntPtr Handle, Border Area)> areas)
+    {
+        ClearThumbnails();
         double scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
         foreach (var (handle, area) in areas)
         {
+            if (!area.IsDescendantOf(this)) continue; // содержимое уже перестроено под другую программу
             if (Native.DwmRegisterThumbnail(_hwnd, handle, out var thumbnail) != 0) continue;
             _thumbnails.Add(thumbnail);
             Native.DwmQueryThumbnailSourceSize(thumbnail, out var source);
@@ -160,6 +179,7 @@ internal sealed class PreviewWindow : Window
 
     public void HidePreview()
     {
+        _generation++;
         ClearThumbnails();
         if (IsVisible) Hide();
     }

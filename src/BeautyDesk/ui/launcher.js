@@ -50,7 +50,8 @@ if (BD.role === 'launcher') {
 
   function render() {
     const query = search.value.trim().toLowerCase();
-    let found = apps;
+    // Служебные утилиты Windows в общем списке не показываются, но поиском находятся.
+    let found = apps.filter((a) => !a.system);
     if (query) {
       found = apps.filter((a) => a.name.toLowerCase().includes(query));
       // Сначала программы, название которых начинается с набранного.

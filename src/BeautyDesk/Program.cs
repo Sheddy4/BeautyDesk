@@ -27,10 +27,18 @@ internal static class Program
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var host = new DesktopHost();
 
+        // Ошибка в одном месте интерфейса не должна оставлять человека без панели и дока: записываем её
+        // и работаем дальше. Но если ошибки сыплются подряд, что-то сломано всерьёз — тогда честно падаем,
+        // и сторож возвращает Windows в обычный вид.
+        var recentErrors = new Queue<DateTime>();
         app.DispatcherUnhandledException += (_, e) =>
         {
             Log.Write($"Необработанная ошибка: {e.Exception}");
-            ShellState.Restore();
+            var now = DateTime.UtcNow;
+            recentErrors.Enqueue(now);
+            while (recentErrors.Count > 0 && now - recentErrors.Peek() > TimeSpan.FromSeconds(10)) recentErrors.Dequeue();
+            if (recentErrors.Count <= 5) e.Handled = true;
+            else ShellState.Restore();
         };
         app.SessionEnding += (_, _) => ShellState.Restore();
         app.Startup += async (_, _) =>

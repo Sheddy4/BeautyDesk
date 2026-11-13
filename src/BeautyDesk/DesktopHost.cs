@@ -79,7 +79,8 @@ internal sealed class DesktopHost
 
         // ManagedShell даёт иконки трея и список открытых окон.
         _shell = new ShellManager(ShellManager.DefaultShellConfig);
-        _dock = new Dock(_shell.Tasks, _settings);
+        _dock = new Dock(_shell.Tasks, _settings,
+            package => _apps.Apps.FirstOrDefault(a => a.Id.StartsWith(package + "!", StringComparison.OrdinalIgnoreCase))?.Id);
         _dockController = new DockController(_dock,
             key => Strings(_settings.Language).GetValueOrDefault(key, key),
             (window, anchor, owner, items) => OpenMenu(window, anchor, owner, items, above: true));
@@ -686,9 +687,10 @@ internal sealed class DesktopHost
 
     private void PublishLauncher()
     {
+        PublishDock(); // со списком программ док может дозагрузить иконки приложений из Магазина
         Publish("launcher", new { apps = _apps.Apps, pinned = _settings.LauncherPins });
         // Иконки первого экрана и закреплённых программ готовятся заранее, чтобы при открытии не появляться с задержкой.
-        _apps.LoadIcons(_settings.LauncherPins.Concat(_apps.Apps.Take(LauncherWarmIcons).Select(a => a.Id)).ToList(), _ => { });
+        _apps.LoadIcons(_settings.LauncherPins.Concat(_apps.Apps.Where(a => !a.System).Take(LauncherWarmIcons).Select(a => a.Id)).ToList(), _ => { });
     }
 
     // ---------- тема, язык, обои ----------

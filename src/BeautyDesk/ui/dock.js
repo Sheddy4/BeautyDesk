@@ -206,6 +206,9 @@ if (BD.role === 'dock') {
         const src = icons[item.icon] ?? '';
         const img = el.firstChild;
         if (img.getAttribute('src') !== src) img.setAttribute('src', src);
+        // Если картинки нет (закреплённая программа не запущена, а её файл закрыт для чтения), рисуем плитку с буквой.
+        el.classList.toggle('no-icon', !src);
+        el.dataset.letter = (title || '?').trim().charAt(0).toUpperCase();
       }
       strip.appendChild(el); // заодно ставит в нужном порядке
     }
