@@ -19,7 +19,10 @@ internal static class Native
 
     public const uint SPI_SETDESKWALLPAPER = 0x14, SPI_GETDESKWALLPAPER = 0x73, SPIF_SENDCHANGE = 0x2;
 
-    public const int WM_HOTKEY = 0x312, WM_DPICHANGED = 0x2E0;
+    public const int WM_HOTKEY = 0x312, WM_DPICHANGED = 0x2E0, WM_WINDOWPOSCHANGING = 0x46;
+    public const uint GW_HWNDPREV = 3;
+    public const int RGN_OR = 2;
+    public static readonly IntPtr HWND_BOTTOM = new(1), HWND_NOTOPMOST = new(-2);
     public const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_NOREPEAT = 0x4000;
 
     public const uint DWM_BB_ENABLE = 1, DWM_BB_BLURREGION = 2;
@@ -89,6 +92,14 @@ internal static class Native
         [MarshalAs(UnmanagedType.Bool)] public bool fSourceClientAreaOnly;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WINDOWPOS
+    {
+        public IntPtr hwnd, hwndInsertAfter;
+        public int x, y, cx, cy;
+        public uint flags;
+    }
+
     public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, IntPtr lprc, IntPtr data);
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
     public delegate IntPtr LowLevelMouseProc(int code, IntPtr wParam, IntPtr lParam);
@@ -106,6 +117,7 @@ internal static class Native
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hwnd, uint direction);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
@@ -151,6 +163,7 @@ internal static class Native
 
     [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int l, int t, int r, int b);
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern int CombineRgn(IntPtr destination, IntPtr first, IntPtr second, int mode);
 
     public static string ClassName(IntPtr hwnd)
     {

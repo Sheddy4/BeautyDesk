@@ -57,6 +57,7 @@ internal sealed class DesktopHost
     private WinKey? _winKey;
     private ShellWindow? _launcher;
     private IntPtr _launcherReturnTo;
+    private bool _editingWidgets;
     private Dock? _dock;
     private DockController? _dockController;
     private int _dockIconsVersion = -1;
@@ -154,7 +155,7 @@ internal sealed class DesktopHost
 
         var monitors = Monitors.All();
         foreach (var monitor in monitors)
-        foreach (var role in new[] { ShellRole.Bar, ShellRole.Dock, ShellRole.Island })
+        foreach (var role in new[] { ShellRole.Desktop, ShellRole.Bar, ShellRole.Dock, ShellRole.Island })
         {
             var window = new ShellWindow(role, monitor);
             window.MessageReceived += OnMessage;
@@ -162,8 +163,9 @@ internal sealed class DesktopHost
             // «Остров» появляется, только когда что-то играет.
             await window.InitAsync(_environment!, BoundsFor(window), startHidden: role == ShellRole.Island);
             if (role == ShellRole.Island) ClipIsland(window);
-            // Окно дока шире и выше самого дока; пока страница не сообщила, где он нарисован, окно пропускает все клики.
-            if (role == ShellRole.Dock) window.SetClip(new Native.RECT { Right = 1, Bottom = 1 });
+            // Окна дока и виджетов больше того, что в них нарисовано; пока страница не сообщила,
+            // где именно, окно пропускает все клики.
+            if (role is ShellRole.Dock or ShellRole.Desktop) window.SetClip(new Native.RECT { Right = 1, Bottom = 1 });
         }
 
         // Меню одно на все экраны: создаётся заранее, чтобы открываться без задержки.
@@ -193,6 +195,9 @@ internal sealed class DesktopHost
                 int h = Px(monitor, theme.DockHeight * DockWindowHeightFactor + DockBottomMargin);
                 return new Native.RECT { Left = m.Left, Top = m.Bottom - h, Right = m.Right, Bottom = m.Bottom };
             }
+            case ShellRole.Desktop:
+                // Весь экран под верхней панелью; видимую часть вырезает страница (сообщение clip).
+                return new Native.RECT { Left = m.Left, Top = m.Top + Px(monitor, theme.BarHeight), Right = m.Right, Bottom = m.Bottom };
             case ShellRole.Island:
             {
                 // Окно всегда развёрнутого размера; в свёрнутом виде от него оставлена только плашка (см. ClipIsland).
@@ -365,6 +370,8 @@ internal sealed class DesktopHost
             islandWidth = IslandWidth,
             language = _settings.Language,
             strings = Strings(_settings.Language),
+            widgets = window.Role == ShellRole.Desktop ? WidgetsFor(window.Monitor) : null,
+            editing = window.Role == ShellRole.Desktop && _editingWidgets,
             paused = _fullscreenMonitor != IntPtr.Zero
         }, Json);
     }
@@ -430,6 +437,26 @@ internal sealed class DesktopHost
                 if (!_settings.LauncherPins.Remove(pinId)) _settings.LauncherPins.Add(pinId);
                 _settings.Save();
                 PublishLauncher();
+                break;
+
+            case "clip" when window.Role == ShellRole.Desktop && message.TryGetProperty("rects", out var rects) && rects.ValueKind == JsonValueKind.Array:
+            {
+                var b = window.Bounds;
+                window.SetClipParts(rects.EnumerateArray().Select(r =>
+                {
+                    var screen = ToScreen(window, r);
+                    return new Native.RECT { Left = screen.Left - b.Left, Top = screen.Top - b.Top, Right = screen.Right - b.Left, Bottom = screen.Bottom - b.Top };
+                }).ToList());
+                break;
+            }
+
+            case "widgetsSave" when window.Role == ShellRole.Desktop && message.TryGetProperty("widgets", out var saved):
+                _settings.Widgets[window.Monitor.Device] = JsonSerializer.Deserialize<List<WidgetPlacement>>(saved.GetRawText(), Json) ?? [];
+                _settings.Save();
+                break;
+
+            case "widgetsEdit" when message.TryGetProperty("value", out var edit):
+                SetWidgetEditing(edit.ValueKind == JsonValueKind.True);
                 break;
 
             case "volumeStep":
@@ -507,6 +534,7 @@ internal sealed class DesktopHost
         [
             new("theme", $"{T("menu.theme")}: {CurrentTheme.NameFor(_settings.Language)}"),
             new("language", $"{T("menu.language")}: {_settings.Language.ToUpperInvariant()}"),
+            new("widgets", T(_editingWidgets ? "menu.widgetsDone" : "menu.widgets")),
             new("", Separator: true),
             new("lock", T("menu.lock")),
             new("sleep", T("menu.sleep")),
@@ -638,6 +666,7 @@ internal sealed class DesktopHost
             case "sleep": Native.SetSuspendState(false, false, false); break;
             case "restart": Shutdown("/r /t 0"); break;
             case "shutdown": Shutdown("/s /t 0"); break;
+            case "widgets": SetWidgetEditing(!_editingWidgets); break;
             case "quit": Exit(); break;
         }
     }
@@ -646,6 +675,35 @@ internal sealed class DesktopHost
     {
         try { Process.Start(new ProcessStartInfo("shutdown.exe", arguments) { CreateNoWindow = true, UseShellExecute = false })?.Dispose(); }
         catch (Exception e) { Log.Write($"Команда завершения работы не выполнена: {e.Message}"); }
+    }
+
+    // ---------- виджеты ----------
+
+    private List<WidgetPlacement> WidgetsFor(MonitorInfo monitor)
+    {
+        if (!_settings.Widgets.TryGetValue(monitor.Device, out var widgets))
+        {
+            // Первый запуск: на основном экране сразу стоят часы и календарь, остальные экраны пустые.
+            widgets = monitor.IsPrimary
+                ?
+                [
+                    new WidgetPlacement { Id = "clock-default", Type = "clock", X = 0, Y = 0, W = 4, H = 2 },
+                    new WidgetPlacement { Id = "calendar-default", Type = "calendar", X = 0, Y = 2, W = 4, H = 4 }
+                ]
+                : [];
+            _settings.Widgets[monitor.Device] = widgets;
+        }
+        return widgets;
+    }
+
+    private void SetWidgetEditing(bool editing)
+    {
+        if (editing == _editingWidgets) return;
+        _editingWidgets = editing;
+        foreach (var w in _windows.Where(w => w.Role == ShellRole.Desktop)) w.SetAboveWindows(editing);
+        // Панель, док и «остров» остаются поверх затемнённого слоя виджетов.
+        foreach (var w in _windows.Where(w => w.Role != ShellRole.Desktop && w.IsVisible)) w.Raise();
+        Broadcast();
     }
 
     // ---------- лаунчер ----------

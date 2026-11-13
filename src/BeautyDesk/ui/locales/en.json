@@ -26,5 +26,10 @@
   "launcher.search": "Search apps",
   "launcher.pinned": "Pinned",
   "launcher.all": "All apps",
-  "launcher.empty": "Nothing found"
+  "launcher.empty": "Nothing found",
+  "widget.clock": "Clock",
+  "widget.calendar": "Calendar",
+  "widgets.done": "Done",
+  "menu.widgets": "Edit widgets",
+  "menu.widgetsDone": "Finish editing widgets"
 }

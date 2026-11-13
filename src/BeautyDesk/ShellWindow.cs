@@ -8,8 +8,9 @@ using Microsoft.Web.WebView2.Wpf;
 
 namespace BeautyDesk;
 
-/// <summary>Bar — верхняя панель, Dock — док, Island — «остров» с музыкой поверх панели, Menu — выпадающее меню, Launcher — лаунчер по клавише Win.</summary>
-internal enum ShellRole { Bar, Dock, Island, Menu, Launcher }
+/// <summary>Bar — верхняя панель, Dock — док, Island — «остров» с музыкой поверх панели, Menu — выпадающее меню, Launcher — лаунчер по клавише Win,
+/// Desktop — слой виджетов на рабочем столе.</summary>
+internal enum ShellRole { Bar, Dock, Island, Menu, Launcher, Desktop }
 
 /// <summary>
 /// Одно окно оболочки. Само окно пустое и прозрачное, всё видимое рисует веб-страница внутри WebView2.
@@ -25,6 +26,7 @@ internal sealed class ShellWindow : Window
     private IntPtr _hwnd;
     private bool _appBarRegistered;
     private Native.RECT _bounds;
+    private bool _aboveWindows;
 
     public ShellRole Role { get; }
     /// <summary>Экран, на котором окно сейчас стоит. Меню одно на все экраны и переезжает между ними.</summary>
@@ -49,7 +51,7 @@ internal sealed class ShellWindow : Window
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;
         ShowActivated = false;
-        Topmost = true;
+        Topmost = role != ShellRole.Desktop; // виджеты лежат на рабочем столе, под обычными окнами
         Background = Brushes.Transparent;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Content = _web;
@@ -128,6 +130,30 @@ internal sealed class ShellWindow : Window
         else Hide();
     }
 
+    /// <summary>Оставляет от окна только указанные прямоугольники — так слой виджетов пропускает клики между ними.</summary>
+    public void SetClipParts(IReadOnlyList<Native.RECT> parts)
+    {
+        var region = Native.CreateRectRgn(0, 0, 0, 0);
+        foreach (var r in parts)
+        {
+            var part = Native.CreateRectRgn(r.Left, r.Top, r.Right, r.Bottom);
+            Native.CombineRgn(region, region, part, Native.RGN_OR);
+            Native.DeleteObject(part);
+        }
+        Native.SetWindowRgn(_hwnd, region, true);
+    }
+
+    /// <summary>
+    /// Режим расстановки виджетов: слой поднимается поверх всех окон, чтобы его было видно целиком.
+    /// В обычном режиме он возвращается на рабочий стол.
+    /// </summary>
+    public void SetAboveWindows(bool above)
+    {
+        _aboveWindows = above;
+        Native.SetWindowPos(_hwnd, above ? Native.HWND_TOPMOST : Native.HWND_NOTOPMOST, 0, 0, 0, 0,
+            Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+    }
+
     /// <summary>Показывает окно и отдаёт ему клавиатуру (лаунчер).</summary>
     public void ShowFocused()
     {
@@ -203,6 +229,16 @@ internal sealed class ShellWindow : Window
         // Окно попало на экран с другим масштабом: Windows при этом сама пересчитывает его размер.
         // Наши размеры уже посчитаны под нужный экран, поэтому возвращаем их на место.
         if (msg == Native.WM_DPICHANGED) Dispatcher.BeginInvoke(() => SetBounds(_bounds));
+
+        // Слой виджетов всегда остаётся в самом низу, прямо над рабочим столом: клик по виджету
+        // не должен поднимать его поверх окон программ.
+        if (msg == Native.WM_WINDOWPOSCHANGING && Role == ShellRole.Desktop && !_aboveWindows)
+        {
+            var position = Marshal.PtrToStructure<Native.WINDOWPOS>(lParam);
+            position.hwndInsertAfter = JustAboveDesktop();
+            position.flags &= ~Native.SWP_NOZORDER;
+            Marshal.StructureToPtr(position, lParam, false);
+        }
         if (Role != ShellRole.Bar) return IntPtr.Zero;
         if ((uint)msg == AppBarCallback && wParam.ToInt32() == Native.ABN_POSCHANGED)
         {
@@ -215,6 +251,14 @@ internal sealed class ShellWindow : Window
             SetBounds(_bounds);
         }
         return IntPtr.Zero;
+    }
+
+    /// <summary>Окно, сразу под которым должен лежать слой виджетов: ближайшее над рабочим столом Windows.</summary>
+    private IntPtr JustAboveDesktop()
+    {
+        var above = Native.GetWindow(Native.FindWindow("Progman", null), Native.GW_HWNDPREV);
+        while (above == _hwnd) above = Native.GetWindow(above, Native.GW_HWNDPREV);
+        return above != IntPtr.Zero ? above : Native.HWND_BOTTOM;
     }
 
     // ---------- прозрачность ----------

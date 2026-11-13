@@ -6,6 +6,19 @@ using BeautyDesk.Services;
 
 namespace BeautyDesk;
 
+/// <summary>Один виджет на рабочем столе: что это и где стоит. Место и размер — в клетках сетки.</summary>
+internal sealed class WidgetPlacement
+{
+    public string Id { get; set; } = "";
+    public string Type { get; set; } = "";
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int W { get; set; } = 2;
+    public int H { get; set; } = 2;
+    /// <summary>Собственные настройки виджета, например город для погоды.</summary>
+    public Dictionary<string, string> Options { get; set; } = [];
+}
+
 /// <summary>Пользовательские настройки, хранятся в %APPDATA%\BeautyDesk\settings.json.</summary>
 internal sealed class Settings
 {
@@ -18,6 +31,8 @@ internal sealed class Settings
     public List<DockPin>? Dock { get; set; }
     /// <summary>Программы, закреплённые в верхней части лаунчера (их имена в папке «Приложения»).</summary>
     public List<string> LauncherPins { get; set; } = [];
+    /// <summary>Виджеты на рабочем столе, отдельно для каждого экрана (ключ — системное имя экрана).</summary>
+    public Dictionary<string, List<WidgetPlacement>> Widgets { get; set; } = [];
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 

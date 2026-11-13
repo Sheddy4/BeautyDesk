@@ -26,5 +26,10 @@
   "launcher.search": "Поиск программ",
   "launcher.pinned": "Закреплённые",
   "launcher.all": "Все программы",
-  "launcher.empty": "Ничего не найдено"
+  "launcher.empty": "Ничего не найдено",
+  "widget.clock": "Часы",
+  "widget.calendar": "Календарь",
+  "widgets.done": "Готово",
+  "menu.widgets": "Изменить виджеты",
+  "menu.widgetsDone": "Закончить изменение виджетов"
 }

@@ -243,6 +243,77 @@ html[data-role="island"] #island.expanded {
 .media-controls button.plain { height: 26px; padding: 0 6px; }
 .media-controls button.plain:hover { background: rgba(255, 255, 255, 0.14); }
 
+/* ---------- виджеты ---------- */
+
+html[data-role="desktop"] #desktop { position: absolute; inset: 0; display: block; }
+#desktop { display: none; }
+
+.widget {
+  position: absolute;
+  background: var(--bd-surface);
+  border: var(--bd-border);
+  border-radius: var(--bd-radius);
+  overflow: hidden;
+}
+.widget-body { height: 100%; padding: 14px; display: flex; flex-direction: column; justify-content: center; }
+
+/* Режим расстановки: слой затемняется, видна сетка, виджеты можно таскать. */
+body.editing #desktop {
+  background-color: rgba(0, 0, 0, 0.45);
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.22) 1px, transparent 1.5px);
+  background-size: 96px 96px;   /* клетка 84 + промежуток 12 */
+  background-position: 10px 10px;
+}
+body.editing .widget { cursor: grab; outline: 1px dashed var(--bd-muted); outline-offset: 2px; }
+body.editing .widget.dragging { cursor: grabbing; opacity: 0.85; outline-color: var(--bd-accent); z-index: 2; }
+body.editing .widget-body { pointer-events: none; }
+
+.widget-tools { position: absolute; top: 6px; right: 6px; display: none; gap: 4px; }
+body.editing .widget-tools { display: flex; }
+.widget-tools button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: var(--bd-menu-bg);
+  border: var(--bd-border);
+  border-radius: 50%;
+}
+.widget-tools button:hover { background: var(--bd-accent); }
+
+#widget-palette {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bd-menu-bg);
+  border: var(--bd-border);
+  border-radius: var(--bd-radius);
+}
+#widget-palette button { padding: 6px 12px; background: var(--bd-control-bg); border-radius: var(--bd-control-radius); white-space: nowrap; }
+#widget-palette button:hover { background: color-mix(in srgb, var(--bd-control-bg), var(--bd-fg) 14%); }
+#widget-palette button.primary { background: var(--bd-accent); color: #fff; }
+
+/* Часы */
+.clock-time { font-size: 3.4em; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.clock-date { margin-top: 8px; color: var(--bd-muted); }
+.widget[data-size="2x2"] .clock-time { font-size: 2.6em; }
+.widget[data-size="3x1"] .widget-body { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 12px; }
+.widget[data-size="3x1"] .clock-time { font-size: 2.2em; }
+.widget[data-size="3x1"] .clock-date { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Календарь */
+.widget-calendar .widget-body { justify-content: flex-start; }
+.calendar-title { margin-bottom: 10px; font-weight: 600; text-transform: capitalize; }
+.calendar-grid { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); align-items: center; justify-items: center; }
+.calendar-weekday { font-size: 0.8em; color: var(--bd-muted); }
+.calendar-day { display: grid; place-items: center; width: 2em; height: 2em; border-radius: 50%; font-variant-numeric: tabular-nums; }
+.calendar-day.weekend { color: var(--bd-muted); }
+.calendar-day.today { background: var(--bd-accent); color: #fff; font-weight: 600; }
+.widget[data-size="3x3"] .calendar-day { width: 1.7em; height: 1.7em; font-size: 0.9em; }
+
 /* ---------- лаунчер ---------- */
 
 html[data-role="launcher"] #launcher {

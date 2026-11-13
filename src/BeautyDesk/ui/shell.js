@@ -40,6 +40,16 @@ const BD = {
     if (img.title !== item.title) img.title = item.title;
   },
 
+  /** Виды виджетов: название -> описание. Каждый файл из папки widgets/ добавляет сюда свой. */
+  widgetTypes: {},
+
+  /**
+   * Регистрирует вид виджета.
+   * title — ключ перевода названия; sizes — допустимые размеры в клетках, первый — по умолчанию;
+   * create(body, context) рисует виджет и может вернуть { update, resize, destroy }.
+   */
+  widget(name, definition) { BD.widgetTypes[name] = definition; },
+
   start() {
     chrome.webview.addEventListener('message', (event) => {
       const message = event.data;

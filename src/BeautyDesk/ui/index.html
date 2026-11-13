@@ -59,6 +59,10 @@
     </div>
   </div>
 
+  <!-- Виджеты на рабочем столе: содержимое добавляет widgets.js -->
+  <div id="desktop"></div>
+  <div id="widget-palette" hidden></div>
+
   <!-- Лаунчер по клавише Win -->
   <div id="launcher" class="surface">
     <input id="launcher-search" type="text" spellcheck="false" autocomplete="off" data-i18n-placeholder="launcher.search">
@@ -80,6 +84,9 @@
   <script src="island.js"></script>
   <script src="menu.js"></script>
   <script src="launcher.js"></script>
+  <script src="widgets/clock.js"></script>
+  <script src="widgets/calendar.js"></script>
+  <script src="widgets.js"></script>
   <script>BD.start();</script>
 </body>
 </html>
