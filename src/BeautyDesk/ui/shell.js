@@ -13,6 +13,9 @@ const BD = {
   /** Подписка: 'state' — тема и язык, остальные названия — темы данных от программы (sys, tray, media, menu). */
   on(type, handler) { (BD.handlers[type] ??= []).push(handler); },
 
+  /** Отписка — для виджетов, которые убирают со стола. */
+  off(type, handler) { BD.handlers[type] = (BD.handlers[type] ?? []).filter((h) => h !== handler); },
+
   /** Прямоугольник элемента в координатах страницы — программа переводит его в координаты экрана. */
   rect(element) {
     const r = element.getBoundingClientRect();

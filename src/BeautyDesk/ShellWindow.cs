@@ -181,6 +181,13 @@ internal sealed class ShellWindow : Window
     /// </summary>
     public void TakeForeground() => Native.SetForegroundWindow(_hwnd);
 
+    /// <summary>Отдаёт окну клавиатуру — когда в нём нужно что-то напечатать.</summary>
+    public void FocusKeyboard()
+    {
+        Native.SetForegroundWindow(_hwnd);
+        _web.Focus();
+    }
+
     /// <summary>Поднимает окно над остальными окнами оболочки.</summary>
     public void Raise() =>
         Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);

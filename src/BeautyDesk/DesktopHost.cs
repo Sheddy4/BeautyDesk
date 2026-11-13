@@ -48,6 +48,10 @@ internal sealed class DesktopHost
     private readonly DispatcherTimer _displayChanged = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly SystemInfo _system = new();
     private readonly MediaInfo _media = new();
+    private readonly AudioSpectrum _spectrum = new();
+    private readonly HardwareInfo _hardware = new();
+    private readonly Weather _weather = new();
+    private readonly DispatcherTimer _hardwareTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
     private IReadOnlyList<Theme> _themes = Themes.LoadAll();
     private CoreWebView2Environment? _environment;
     private ShellManager? _shell;
@@ -91,6 +95,8 @@ internal sealed class DesktopHost
         _tray.Changed += () => Publish("tray", _tray.Snapshot());
         _system.Changed += () => Publish("sys", _system.Current);
         _media.Changed += () => { Publish("media", _media.Current); UpdateVisibility(); };
+        _spectrum.Changed += levels => Publish("audio", levels);
+        _hardwareTimer.Tick += (_, _) => Publish("hw", _hardware.Read());
 
         _environment = await CoreWebView2Environment.CreateAsync(null, AppPaths.WebViewData);
         await BuildWindowsAsync();
@@ -98,6 +104,7 @@ internal sealed class DesktopHost
 
         Publish("tray", _tray.Snapshot());
         PublishDock();
+        UpdateWidgetServices();
         Publish("media", _media.Current);
         _system.Refresh();
         Publish("sys", _system.Current);
@@ -134,6 +141,9 @@ internal sealed class DesktopHost
         _launcher?.Close();
         _winKey?.Dispose();
         _dockController?.Close();
+        _hardwareTimer.Stop();
+        _spectrum.Dispose();
+        _hardware.Dispose();
         _system.Dispose();
         _shell?.Dispose();
         ShellState.Restore();
@@ -238,6 +248,7 @@ internal sealed class DesktopHost
         UpdateVisibility();
         // Страницы останавливают анимации при полноэкранном приложении, а док прячется при развёрнутом окне.
         Broadcast();
+        UpdateWidgetServices();
     }
 
     /// <summary>
@@ -316,14 +327,15 @@ internal sealed class DesktopHost
 
     // ---------- данные для страниц ----------
 
-    /// <summary>Какое окно читает какую тему данных.</summary>
-    private static ShellRole RoleFor(string topic) => topic switch
+    /// <summary>Какие окна читают какую тему данных.</summary>
+    private static ShellRole[] RolesFor(string topic) => topic switch
     {
-        "media" => ShellRole.Island,
-        "launcher" => ShellRole.Launcher,
-        "dock" or "dockIcons" or "dockHold" => ShellRole.Dock,
-        "menu" => ShellRole.Menu,
-        _ => ShellRole.Bar
+        "media" => [ShellRole.Island, ShellRole.Desktop], // «остров» и виджет плеера
+        "audio" or "hw" => [ShellRole.Desktop],
+        "launcher" => [ShellRole.Launcher],
+        "dock" or "dockIcons" or "dockHold" => [ShellRole.Dock],
+        "menu" => [ShellRole.Menu],
+        _ => [ShellRole.Bar]
     };
 
     private IEnumerable<ShellWindow> AllWindows => _windows.Concat(new[] { _menu, _launcher }.OfType<ShellWindow>());
@@ -334,7 +346,7 @@ internal sealed class DesktopHost
         var json = JsonSerializer.Serialize(new { type = topic, data }, Json);
         if (_topics.TryGetValue(topic, out var last) && last == json) return;
         _topics[topic] = json;
-        foreach (var w in AllWindows.Where(w => w.Role == RoleFor(topic))) w.Post(json);
+        foreach (var w in AllWindows.Where(w => RolesFor(topic).Contains(w.Role))) w.Post(json);
     }
 
     private void PublishDock()
@@ -385,7 +397,7 @@ internal sealed class DesktopHost
             case "ready":
                 window.Post(StateJson(window));
                 foreach (var (topic, json) in _topics)
-                    if (RoleFor(topic) == window.Role) window.Post(json);
+                    if (RolesFor(topic).Contains(window.Role)) window.Post(json);
                 break;
 
             case "tray" when message.TryGetProperty("rect", out var rect):
@@ -453,6 +465,16 @@ internal sealed class DesktopHost
             case "widgetsSave" when window.Role == ShellRole.Desktop && message.TryGetProperty("widgets", out var saved):
                 _settings.Widgets[window.Monitor.Device] = JsonSerializer.Deserialize<List<WidgetPlacement>>(saved.GetRawText(), Json) ?? [];
                 _settings.Save();
+                UpdateWidgetServices();
+                break;
+
+            case "weather" when Text(message, "city") is { Length: > 0 } city:
+                _ = SendWeatherAsync(window, city);
+                break;
+
+            case "focus":
+                // Виджету нужно поле ввода (город для погоды), а окно виджетов само клавиатуру не берёт.
+                window.FocusKeyboard();
                 break;
 
             case "widgetsEdit" when message.TryGetProperty("value", out var edit):
@@ -683,17 +705,51 @@ internal sealed class DesktopHost
     {
         if (!_settings.Widgets.TryGetValue(monitor.Device, out var widgets))
         {
-            // Первый запуск: на основном экране сразу стоят часы и календарь, остальные экраны пустые.
+            // Первый запуск: на основном экране сразу стоит набор виджетов, остальные экраны пустые.
             widgets = monitor.IsPrimary
                 ?
                 [
                     new WidgetPlacement { Id = "clock-default", Type = "clock", X = 0, Y = 0, W = 4, H = 2 },
-                    new WidgetPlacement { Id = "calendar-default", Type = "calendar", X = 0, Y = 2, W = 4, H = 4 }
+                    new WidgetPlacement { Id = "calendar-default", Type = "calendar", X = 0, Y = 2, W = 4, H = 4 },
+                    new WidgetPlacement { Id = "weather-default", Type = "weather", X = 4, Y = 0, W = 4, H = 2 },
+                    new WidgetPlacement { Id = "hardware-default", Type = "hardware", X = 4, Y = 2, W = 4, H = 2 },
+                    new WidgetPlacement { Id = "player-default", Type = "player", X = 4, Y = 4, W = 4, H = 3 }
                 ]
                 : [];
             _settings.Widgets[monitor.Device] = widgets;
         }
         return widgets;
+    }
+
+    /// <summary>
+    /// Включает только те источники данных, которые нужны стоящим на столе виджетам:
+    /// эквалайзер слушает звук лишь при виджете плеера, железо опрашивается лишь при своём виджете.
+    /// При полноэкранном приложении всё останавливается.
+    /// </summary>
+    private void UpdateWidgetServices()
+    {
+        var inUse = _windows.Where(w => w.Role == ShellRole.Desktop)
+            .SelectMany(w => WidgetsFor(w.Monitor)).Select(w => w.Type).ToHashSet();
+        bool running = _fullscreenMonitor == IntPtr.Zero;
+
+        _spectrum.SetActive(running && inUse.Contains("player"));
+        if (running && inUse.Contains("hardware"))
+        {
+            if (!_hardwareTimer.IsEnabled)
+            {
+                var now = _hardware.Read();
+                Log.Write($"Монитор железа: память {now.MemoryUsedGb}/{now.MemoryTotalGb} ГБ, видеокарта {now.GpuName ?? "нет данных"}, {now.GpuTemperature?.ToString() ?? "—"} °C");
+                Publish("hw", now);
+                _hardwareTimer.Start();
+            }
+        }
+        else _hardwareTimer.Stop();
+    }
+
+    private async Task SendWeatherAsync(ShellWindow window, string city)
+    {
+        var report = await _weather.GetAsync(city, _settings.Language);
+        window.Post(JsonSerializer.Serialize(new { type = "weather", data = report }, Json));
     }
 
     private void SetWidgetEditing(bool editing)

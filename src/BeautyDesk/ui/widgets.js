@@ -65,6 +65,13 @@ if (BD.role === 'desktop') {
     remove.textContent = '✕';
     remove.addEventListener('click', () => { layout = layout.filter((i) => i.id !== item.id); render(); save(); });
     tools.append(resize, remove);
+    // У виджетов с собственными настройками (город для погоды) есть ещё кнопка с карандашом.
+    if (type.editable) {
+      const edit = document.createElement('button');
+      edit.textContent = '✎';
+      edit.addEventListener('click', () => instances.get(item.id)?.api.edit?.());
+      tools.prepend(edit);
+    }
     // Нажатие на кнопку не должно начинать перетаскивание виджета.
     tools.addEventListener('pointerdown', (event) => event.stopPropagation());
 
