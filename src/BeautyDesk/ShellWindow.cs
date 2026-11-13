@@ -8,8 +8,8 @@ using Microsoft.Web.WebView2.Wpf;
 
 namespace BeautyDesk;
 
-/// <summary>Bar — верхняя панель, Dock — док, Island — «остров» с музыкой поверх панели, Menu — выпадающее меню.</summary>
-internal enum ShellRole { Bar, Dock, Island, Menu }
+/// <summary>Bar — верхняя панель, Dock — док, Island — «остров» с музыкой поверх панели, Menu — выпадающее меню, Launcher — лаунчер по клавише Win.</summary>
+internal enum ShellRole { Bar, Dock, Island, Menu, Launcher }
 
 /// <summary>
 /// Одно окно оболочки. Само окно пустое и прозрачное, всё видимое рисует веб-страница внутри WebView2.
@@ -35,6 +35,10 @@ internal sealed class ShellWindow : Window
     public bool Expanded { get; set; }
 
     public event Action<ShellWindow, JsonElement>? MessageReceived;
+
+    // В лаунчере печатают, поэтому ему, в отличие от остальных окон оболочки, нужен фокус клавиатуры.
+    private bool TakesFocus => Role == ShellRole.Launcher;
+
     public ShellWindow(ShellRole role, MonitorInfo monitor)
     {
         Role = role;
@@ -58,9 +62,10 @@ internal sealed class ShellWindow : Window
         source.CompositionTarget.BackgroundColor = Colors.Transparent;
         source.AddHook(WndProc);
 
-        // Окно не попадает в Alt+Tab и само не просит фокус у программы, с которой работает человек.
-        long ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE).ToInt64();
-        Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(ex | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE));
+        // Окно не попадает в Alt+Tab и (кроме лаунчера) само не просит фокус у программы, с которой работает человек.
+        long ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE).ToInt64() | Native.WS_EX_TOOLWINDOW;
+        if (!TakesFocus) ex |= Native.WS_EX_NOACTIVATE;
+        Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(ex));
 
         MakeTransparent();
         _bounds = bounds;
@@ -121,6 +126,16 @@ internal sealed class ShellWindow : Window
             SetBounds(_bounds);
         }
         else Hide();
+    }
+
+    /// <summary>Показывает окно и отдаёт ему клавиатуру (лаунчер).</summary>
+    public void ShowFocused()
+    {
+        Show();
+        SetBounds(_bounds);
+        Native.SetForegroundWindow(_hwnd);
+        Activate();
+        _web.Focus();
     }
 
     /// <summary>

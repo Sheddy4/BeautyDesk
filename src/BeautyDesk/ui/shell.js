@@ -73,4 +73,5 @@ function applyState() {
 
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = BD.t(el.dataset.i18n);
   for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = BD.t(el.dataset.i18nTitle);
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = BD.t(el.dataset.i18nPlaceholder);
 }

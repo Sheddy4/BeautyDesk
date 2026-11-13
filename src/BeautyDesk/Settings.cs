@@ -16,6 +16,8 @@ internal sealed class Settings
     public string? Wallpaper { get; set; }
     /// <summary>Закреплённое в доке; null — ещё не настраивалось, при первом запуске заполнится само.</summary>
     public List<DockPin>? Dock { get; set; }
+    /// <summary>Программы, закреплённые в верхней части лаунчера (их имена в папке «Приложения»).</summary>
+    public List<string> LauncherPins { get; set; } = [];
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 

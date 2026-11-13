@@ -22,5 +22,9 @@
   "dock.unpin": "Remove from Dock",
   "dock.close": "Close",
   "dock.closeAll": "Close all windows",
-  "dock.emptyTrash": "Empty Recycle Bin"
+  "dock.emptyTrash": "Empty Recycle Bin",
+  "launcher.search": "Search apps",
+  "launcher.pinned": "Pinned",
+  "launcher.all": "All apps",
+  "launcher.empty": "Nothing found"
 }

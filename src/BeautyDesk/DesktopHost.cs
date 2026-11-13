@@ -26,6 +26,8 @@ internal sealed class DesktopHost
     // Окно дока выше самого дока: в запас помещаются увеличенные под курсором иконки.
     private const double DockWindowHeightFactor = 2.4;
     private const double MenuWideWidth = 300;
+    private const double LauncherWidth = 720, LauncherHeight = 560;
+    private const int LauncherWarmIcons = 48;
     private const int TrayGridColumns = 5;
     private const double TrayGridCell = 34;
     private const double MenuWidth = 240, MenuItemHeight = 30, MenuSeparatorHeight = 9, MenuPadding = 14, MenuGap = 4;
@@ -51,6 +53,10 @@ internal sealed class DesktopHost
     private ShellManager? _shell;
     private TrayIcons? _tray;
     private ShellWindow? _menu;
+    private readonly AppCatalog _apps = new();
+    private WinKey? _winKey;
+    private ShellWindow? _launcher;
+    private IntPtr _launcherReturnTo;
     private Dock? _dock;
     private DockController? _dockController;
     private int _dockIconsVersion = -1;
@@ -102,6 +108,11 @@ internal sealed class DesktopHost
         _displayChanged.Tick += async (_, _) => { _displayChanged.Stop(); await BuildWindowsAsync(); UpdateVisibility(); };
         SystemEvents.DisplaySettingsChanged += (_, _) => { _displayChanged.Stop(); _displayChanged.Start(); };
 
+        _winKey = new WinKey();
+        _winKey.Pressed += ToggleLauncher;
+        _apps.Loaded += PublishLauncher;
+        _apps.Refresh();
+
         Native.RegisterHotKey(IntPtr.Zero, ExitHotKeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, VK_Q);
         ComponentDispatcher.ThreadPreprocessMessage += OnThreadMessage;
 
@@ -118,6 +129,8 @@ internal sealed class DesktopHost
         foreach (var w in _windows) w.Close();
         _windows.Clear();
         _menu?.Close();
+        _launcher?.Close();
+        _winKey?.Dispose();
         _dockController?.Close();
         _system.Dispose();
         _shell?.Dispose();
@@ -132,9 +145,11 @@ internal sealed class DesktopHost
     private async Task BuildWindowsAsync()
     {
         CloseMenu();
+        CloseLauncher();
         foreach (var w in _windows) w.Close();
         _windows.Clear();
         _menu?.Close();
+        _launcher?.Close();
 
         var monitors = Monitors.All();
         foreach (var monitor in monitors)
@@ -154,6 +169,10 @@ internal sealed class DesktopHost
         _menu = new ShellWindow(ShellRole.Menu, monitors[0]);
         _menu.MessageReceived += OnMessage;
         await _menu.InitAsync(_environment!, default, startHidden: true);
+
+        _launcher = new ShellWindow(ShellRole.Launcher, monitors[0]);
+        _launcher.MessageReceived += OnMessage;
+        await _launcher.InitAsync(_environment!, default, startHidden: true);
     }
 
     private static int Px(MonitorInfo monitor, double units) => (int)Math.Round(units * monitor.Scale);
@@ -295,12 +314,13 @@ internal sealed class DesktopHost
     private static ShellRole RoleFor(string topic) => topic switch
     {
         "media" => ShellRole.Island,
+        "launcher" => ShellRole.Launcher,
         "dock" or "dockIcons" or "dockHold" => ShellRole.Dock,
         "menu" => ShellRole.Menu,
         _ => ShellRole.Bar
     };
 
-    private IEnumerable<ShellWindow> AllWindows => _menu is null ? _windows : _windows.Append(_menu);
+    private IEnumerable<ShellWindow> AllWindows => _windows.Concat(new[] { _menu, _launcher }.OfType<ShellWindow>());
 
     /// <summary>Рассылает данные страницам; повтор тех же данных не отправляется.</summary>
     private void Publish(string topic, object? data)
@@ -390,6 +410,26 @@ internal sealed class DesktopHost
                 window.SetClip(new Native.RECT { Left = screen.Left - b.Left, Top = screen.Top - b.Top, Right = screen.Right - b.Left, Bottom = screen.Bottom - b.Top });
                 break;
             }
+
+            case "launch" when Text(message, "id") is { } appId:
+                CloseLauncher(returnFocus: false);
+                AppCatalog.Launch(appId);
+                break;
+
+            case "launcherClose":
+                CloseLauncher();
+                break;
+
+            case "launcherIcons" when message.TryGetProperty("ids", out var wanted) && wanted.ValueKind == JsonValueKind.Array:
+                _apps.LoadIcons(wanted.EnumerateArray().Select(e => e.GetString() ?? "").ToList(),
+                    icons => window.Post(JsonSerializer.Serialize(new { type = "launcherIcons", data = icons }, Json)));
+                break;
+
+            case "launcherPin" when Text(message, "id") is { } pinId:
+                if (!_settings.LauncherPins.Remove(pinId)) _settings.LauncherPins.Add(pinId);
+                _settings.Save();
+                PublishLauncher();
+                break;
 
             case "volumeStep":
                 _system.StepVolume(Number(message, "delta"));
@@ -529,12 +569,12 @@ internal sealed class DesktopHost
     private void CloseMenu()
     {
         _menuOwner = null;
-        WatchOutsideClicks(false);
         _menu?.SetShown(false);
+        WatchOutsideClicks(_launcher is { IsVisible: true });
     }
 
     /// <summary>
-    /// Пока меню открыто, следим за нажатиями мыши по всему экрану: нажатие мимо меню его закрывает.
+    /// Пока открыто меню или лаунчер, следим за нажатиями мыши по всему экрану: нажатие мимо закрывает их.
     /// На потерю фокуса полагаться нельзя — окна оболочки фокус не держат.
     /// </summary>
     private void WatchOutsideClicks(bool on)
@@ -550,12 +590,14 @@ internal sealed class DesktopHost
         {
             int message = wParam.ToInt32();
             bool pressed = message is Native.WM_LBUTTONDOWN or Native.WM_RBUTTONDOWN or Native.WM_MBUTTONDOWN;
-            if (code >= 0 && pressed && _menu is not null)
+            if (code >= 0 && pressed)
             {
                 var point = System.Runtime.InteropServices.Marshal.PtrToStructure<Native.POINT>(lParam);
                 // Нажатие на саму кнопку меню не считается: его обработает панель и закроет меню сама.
-                if (!Contains(_menu.Bounds, point) && !Contains(_menuAnchor, point))
+                if (_menu is { IsVisible: true } && !Contains(_menu.Bounds, point) && !Contains(_menuAnchor, point))
                     Application.Current.Dispatcher.BeginInvoke(CloseMenu);
+                if (_launcher is { IsVisible: true } && !Contains(_launcher.Bounds, point))
+                    Application.Current.Dispatcher.BeginInvoke(() => CloseLauncher());
             }
             return Native.CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
         };
@@ -603,6 +645,50 @@ internal sealed class DesktopHost
     {
         try { Process.Start(new ProcessStartInfo("shutdown.exe", arguments) { CreateNoWindow = true, UseShellExecute = false })?.Dispose(); }
         catch (Exception e) { Log.Write($"Команда завершения работы не выполнена: {e.Message}"); }
+    }
+
+    // ---------- лаунчер ----------
+
+    private void ToggleLauncher()
+    {
+        if (_launcher is null) return;
+        if (_launcher.IsVisible) { CloseLauncher(); return; }
+
+        CloseMenu();
+        _dockController?.HidePreview();
+        _apps.Refresh(); // на случай, если с прошлого раза что-то установили или удалили
+
+        // Лаунчер открывается на том экране, где сейчас курсор.
+        Native.GetCursorPos(out var cursor);
+        var monitor = _windows.Select(w => w.Monitor).FirstOrDefault(m => Contains(m.Bounds, cursor)) ?? _launcher.Monitor;
+        var m = monitor.Bounds;
+        int width = Math.Min(Px(monitor, LauncherWidth), m.Width), height = Math.Min(Px(monitor, LauncherHeight), m.Height);
+        int left = m.Left + (m.Width - width) / 2, top = m.Top + (m.Height - height) / 3;
+
+        _launcher.Monitor = monitor;
+        _launcher.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
+        _launcher.Post(StateJson(_launcher));
+        _launcher.Post("{\"type\":\"launcherOpen\"}");
+        _launcherReturnTo = Native.GetForegroundWindow();
+        _launcher.ShowFocused();
+        WatchOutsideClicks(true);
+    }
+
+    /// <param name="returnFocus">Вернуть клавиатуру программе, из которой лаунчер вызвали. При запуске программы
+    /// из лаунчера не нужно: фокус должна получить она.</param>
+    private void CloseLauncher(bool returnFocus = true)
+    {
+        if (_launcher is not { IsVisible: true }) return;
+        _launcher.SetShown(false);
+        if (returnFocus && _launcherReturnTo != IntPtr.Zero) Native.SetForegroundWindow(_launcherReturnTo);
+        WatchOutsideClicks(_menu is { IsVisible: true });
+    }
+
+    private void PublishLauncher()
+    {
+        Publish("launcher", new { apps = _apps.Apps, pinned = _settings.LauncherPins });
+        // Иконки первого экрана и закреплённых программ готовятся заранее, чтобы при открытии не появляться с задержкой.
+        _apps.LoadIcons(_settings.LauncherPins.Concat(_apps.Apps.Take(LauncherWarmIcons).Select(a => a.Id)).ToList(), _ => { });
     }
 
     // ---------- тема, язык, обои ----------

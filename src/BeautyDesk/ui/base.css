@@ -14,7 +14,7 @@
   --bd-radius: 10px;
   --bd-control-bg: rgba(255, 255, 255, 0.08);
   --bd-control-radius: 6px;
-  --bd-menu-bg: rgba(24, 24, 24, 0.96);
+  --bd-menu-bg: #181818; /* меню и лаунчер непрозрачные: размытия под ними нет, и текст на просвет не читается */
   --bd-island-bg: #000;
   --bd-island-fg: #fff;
 }
@@ -229,6 +229,58 @@ html[data-role="island"] #island.expanded {
 .media-controls { display: flex; justify-content: center; gap: 14px; height: 26px; margin-top: -4px; }
 .media-controls button.plain { height: 26px; padding: 0 6px; }
 .media-controls button.plain:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* ---------- лаунчер ---------- */
+
+html[data-role="launcher"] #launcher {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px;
+  background: var(--bd-menu-bg);
+  border: var(--bd-border);
+  border-radius: var(--bd-radius);
+}
+#launcher-search {
+  flex: none;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 1.15em;
+  color: inherit;
+  background: var(--bd-control-bg);
+  border: 0;
+  outline: 0;
+  border-radius: var(--bd-control-radius);
+}
+#launcher-search::placeholder { color: var(--bd-muted); }
+#launcher-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--bd-control-bg) transparent; }
+.launcher-title { margin: 8px 4px 6px; font-size: 0.85em; color: var(--bd-muted); }
+.launcher-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.launcher-app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 4px;
+  border-radius: var(--bd-control-radius);
+}
+.launcher-app:hover, .launcher-app.selected { background: var(--bd-control-bg); }
+.launcher-app img { width: 44px; height: 44px; object-fit: contain; }
+.launcher-app img:not([src]) { visibility: hidden; }
+.launcher-app span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.85em;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+#launcher-empty { padding: 24px; text-align: center; }
 
 /* ---------- меню ---------- */
 

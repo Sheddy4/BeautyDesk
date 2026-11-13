@@ -22,5 +22,9 @@
   "dock.unpin": "Открепить",
   "dock.close": "Закрыть",
   "dock.closeAll": "Закрыть все окна",
-  "dock.emptyTrash": "Очистить корзину"
+  "dock.emptyTrash": "Очистить корзину",
+  "launcher.search": "Поиск программ",
+  "launcher.pinned": "Закреплённые",
+  "launcher.all": "Все программы",
+  "launcher.empty": "Ничего не найдено"
 }

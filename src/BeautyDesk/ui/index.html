@@ -59,6 +59,18 @@
     </div>
   </div>
 
+  <!-- Лаунчер по клавише Win -->
+  <div id="launcher" class="surface">
+    <input id="launcher-search" type="text" spellcheck="false" autocomplete="off" data-i18n-placeholder="launcher.search">
+    <div id="launcher-scroll">
+      <div class="launcher-title" id="launcher-pinned-title" data-i18n="launcher.pinned"></div>
+      <div class="launcher-grid" id="launcher-pinned"></div>
+      <div class="launcher-title" id="launcher-all-title" data-i18n="launcher.all"></div>
+      <div class="launcher-grid" id="launcher-all"></div>
+      <div id="launcher-empty" class="muted" data-i18n="launcher.empty" hidden></div>
+    </div>
+  </div>
+
   <!-- Выпадающее меню -->
   <div id="menu" class="surface"></div>
 
@@ -67,6 +79,7 @@
   <script src="dock.js"></script>
   <script src="island.js"></script>
   <script src="menu.js"></script>
+  <script src="launcher.js"></script>
   <script>BD.start();</script>
 </body>
 </html>

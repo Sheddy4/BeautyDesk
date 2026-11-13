@@ -36,6 +36,7 @@ internal sealed class Dock
     private readonly Tasks _tasks;
     private readonly Settings _settings;
     private readonly Dictionary<string, string> _icons = [];
+    private readonly HashSet<string> _noIcon = []; // программы, для которых иконку получить не удалось, — повторно не пробуем
     private readonly HashSet<ApplicationWindow> _tracked = [];
     private readonly Dictionary<IntPtr, WindowIdentity.Info> _identities = [];
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
@@ -80,10 +81,13 @@ internal sealed class Dock
         Item AppItem(string key, string title, bool pinned, string parsingName, List<ApplicationWindow>? own)
         {
             own ??= [];
-            if (!_icons.ContainsKey(key))
+            if (!_icons.ContainsKey(key) && !_noIcon.Contains(key))
             {
+                // Иконку из файла программы прочитать удаётся не всегда (например, у приложений из Магазина путь закрыт) —
+                // тогда берём ту, что даёт само окно.
                 var icon = IconLoader.DataUrl(parsingName) ?? IconLoader.Encode(own.FirstOrDefault()?.Icon);
                 if (icon is not null) SetIcon(key, icon);
+                else _noIcon.Add(key);
             }
             return new Item("app:" + key, "app", title, _icons.ContainsKey(key) ? key : null, pinned, own.Count > 0,
                 own.Any(w => w.State == ApplicationWindow.WindowState.Active),
