@@ -13,7 +13,9 @@ internal sealed class AudioSpectrum : IDisposable
 {
     public const int Bands = 24;
 
-    private const int FftPower = 10, FftSize = 1 << FftPower;
+    // Окно анализа длинное (около 85 мс), чтобы различать низкие частоты, но сдвигается понемногу,
+    // поэтому полосы обновляются так же часто, как и при коротком окне.
+    private const int FftPower = 12, FftSize = 1 << FftPower, Hop = 1024;
     private const double LowestHz = 40, HighestHz = 16000;
     private const float FloorDb = -70, RangeDb = 60; // что тише — считается тишиной; столько децибел занимает вся высота полосы
 
@@ -111,7 +113,8 @@ internal sealed class AudioSpectrum : IDisposable
                 _samples[_filled++] = mono / format.Channels;
                 if (_filled < FftSize) continue;
                 Analyse(format.SampleRate);
-                _filled = 0;
+                Array.Copy(_samples, Hop, _samples, 0, FftSize - Hop);
+                _filled = FftSize - Hop;
             }
         }
     }

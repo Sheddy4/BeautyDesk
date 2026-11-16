@@ -20,7 +20,7 @@ internal static class Native
     public const uint SPI_SETDESKWALLPAPER = 0x14, SPI_GETDESKWALLPAPER = 0x73, SPIF_SENDCHANGE = 0x2;
 
     public const int WM_HOTKEY = 0x312, WM_DPICHANGED = 0x2E0, WM_WINDOWPOSCHANGING = 0x46;
-    public const uint GW_HWNDPREV = 3;
+    public const uint GW_HWNDNEXT = 2, GW_HWNDPREV = 3;
     public const int RGN_OR = 2;
     public static readonly IntPtr HWND_BOTTOM = new(1), HWND_NOTOPMOST = new(-2);
     public const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_NOREPEAT = 0x4000;

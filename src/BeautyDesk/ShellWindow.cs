@@ -260,12 +260,43 @@ internal sealed class ShellWindow : Window
         return IntPtr.Zero;
     }
 
+    /// <summary>
+    /// Окно рабочего стола Windows — то, в котором лежат значки. Обычно это Progman,
+    /// но при некоторых обоях значки переезжают в одно из окон WorkerW.
+    /// </summary>
+    private static IntPtr WindowsDesktop()
+    {
+        var progman = Native.FindWindow("Progman", null);
+        if (Native.FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero) return progman;
+        var found = progman;
+        Native.EnumWindows((hwnd, _) =>
+        {
+            if (Native.ClassName(hwnd) != "WorkerW" || Native.FindWindowEx(hwnd, IntPtr.Zero, "SHELLDLL_DefView", null) == IntPtr.Zero) return true;
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     /// <summary>Окно, сразу под которым должен лежать слой виджетов: ближайшее над рабочим столом Windows.</summary>
     private IntPtr JustAboveDesktop()
     {
-        var above = Native.GetWindow(Native.FindWindow("Progman", null), Native.GW_HWNDPREV);
+        var above = Native.GetWindow(WindowsDesktop(), Native.GW_HWNDPREV);
         while (above == _hwnd) above = Native.GetWindow(above, Native.GW_HWNDPREV);
         return above != IntPtr.Zero ? above : Native.HWND_BOTTOM;
+    }
+
+    /// <summary>
+    /// Возвращает слой виджетов на место — прямо над рабочим столом. Нужно вызывать время от времени:
+    /// по Win+D Windows поднимает рабочий стол поверх всех окон и закрывает им виджеты,
+    /// а при возврате окон опускает обратно.
+    /// </summary>
+    public void KeepOnDesktop()
+    {
+        if (Role != ShellRole.Desktop || _aboveWindows || !IsVisible) return;
+        if (Native.GetWindow(_hwnd, Native.GW_HWNDNEXT) == WindowsDesktop()) return;
+        // Само место в стопке окон подставляется при обработке WM_WINDOWPOSCHANGING.
+        Native.SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
     }
 
     // ---------- прозрачность ----------

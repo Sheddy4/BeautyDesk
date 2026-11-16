@@ -93,7 +93,8 @@ internal sealed class DesktopHost
         _dockController.PreviewShownChanged += shown => Publish("dockHold", new { value = shown });
         _tray = new TrayIcons(_shell.NotificationArea);
         _tray.Changed += () => Publish("tray", _tray.Snapshot());
-        _system.Changed += () => Publish("sys", _system.Current);
+        // Смена активного окна — в том числе показ рабочего стола по Win+D: виджеты сразу возвращаются на место.
+        _system.Changed += () => { Publish("sys", _system.Current); KeepWidgetsOnDesktop(); };
         _media.Changed += () => { Publish("media", _media.Current); UpdateVisibility(); };
         _spectrum.Changed += levels => Publish("audio", levels);
         _hardwareTimer.Tick += (_, _) => Publish("hw", _hardware.Read());
@@ -239,6 +240,7 @@ internal sealed class DesktopHost
         _system.Refresh();
         if (_tick++ % 6 == 0) _dock?.RefreshTrash();
         ReportPointer();
+        KeepWidgetsOnDesktop();
 
         var fullscreen = FullscreenMonitor();
         var maximized = MaximizedMonitors();
@@ -750,6 +752,11 @@ internal sealed class DesktopHost
     {
         var report = await _weather.GetAsync(city, _settings.Language);
         window.Post(JsonSerializer.Serialize(new { type = "weather", data = report }, Json));
+    }
+
+    private void KeepWidgetsOnDesktop()
+    {
+        foreach (var w in _windows.Where(w => w.Role == ShellRole.Desktop)) w.KeepOnDesktop();
     }
 
     private void SetWidgetEditing(bool editing)
