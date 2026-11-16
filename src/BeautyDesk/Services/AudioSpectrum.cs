@@ -24,7 +24,9 @@ internal sealed class AudioSpectrum : IDisposable
     private readonly float[] _samples = new float[FftSize];
     private readonly float[] _latest = new float[Bands];
     private readonly float[] _shown = new float[Bands];
+    private readonly MMDeviceEnumerator _devices = new();
     private WasapiLoopbackCapture? _capture;
+    private string? _deviceId; // устройство вывода, которое сейчас слушаем
     private int _filled;
     private bool _wanted;
     private bool _silent = true;
@@ -60,6 +62,7 @@ internal sealed class AudioSpectrum : IDisposable
     {
         _timer.Stop();
         Stop();
+        _devices.Dispose();
     }
 
     private void Start()
@@ -67,19 +70,37 @@ internal sealed class AudioSpectrum : IDisposable
         if (_capture is not null) return;
         try
         {
-            var capture = new WasapiLoopbackCapture();
+            if (!_devices.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)) return;
+            var device = _devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            var capture = new WasapiLoopbackCapture(device);
             capture.DataAvailable += OnData;
-            // Устройство вывода сменили или отключили — захват останавливается сам; позже попробуем начать заново.
+            // Устройство вывода отключили — захват останавливается сам; позже попробуем начать заново.
             capture.RecordingStopped += (_, _) => { if (ReferenceEquals(_capture, capture)) Stop(); };
             capture.StartRecording();
             _capture = capture;
-            Log.Write($"Эквалайзер слушает звук: {capture.WaveFormat.SampleRate} Гц, каналов {capture.WaveFormat.Channels}");
+            _deviceId = device.ID;
+            Log.Write($"Эквалайзер слушает «{device.FriendlyName}»: {capture.WaveFormat.SampleRate} Гц, каналов {capture.WaveFormat.Channels}");
         }
         catch (Exception e)
         {
             Log.Write($"Звук для эквалайзера недоступен: {e.Message}");
             _capture = null;
         }
+    }
+
+    /// <summary>
+    /// Звук могли переключить на другое устройство (подключили монитор с колонками, наушники).
+    /// Старое при этом никуда не делось и просто молчит, поэтому сравниваем с текущим устройством по умолчанию.
+    /// </summary>
+    private bool OutputDeviceChanged()
+    {
+        try
+        {
+            if (!_devices.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)) return false;
+            using var current = _devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            return current.ID != _deviceId;
+        }
+        catch (Exception) { return false; }
     }
 
     private void Stop()
@@ -143,11 +164,12 @@ internal sealed class AudioSpectrum : IDisposable
 
     private void Tick()
     {
-        // Захват мог остановиться из-за смены устройства вывода — раз в пару секунд пробуем начать заново.
-        if (_wanted && _capture is null && --_retryIn <= 0)
+        // Раз в пару секунд: если звук переключили на другое устройство или захват оборвался — начинаем заново.
+        if (_wanted && --_retryIn <= 0)
         {
             _retryIn = 60;
-            Start();
+            if (_capture is not null && OutputDeviceChanged()) Stop();
+            if (_capture is null) Start();
         }
 
         bool any = false;

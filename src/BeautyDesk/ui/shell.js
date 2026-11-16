@@ -67,6 +67,9 @@ const BD = {
 };
 
 document.documentElement.dataset.role = BD.role;
+// Ошибки скриптов уходят в журнал программы: окна оболочки без консоли, иначе их никто не увидит.
+window.addEventListener('error', (event) => BD.send({ type: 'log', text: `${event.message} (${(event.filename ?? '').split('/').pop()}:${event.lineno})` }));
+window.addEventListener('unhandledrejection', (event) => BD.send({ type: 'log', text: `Необработанный отказ: ${event.reason}` }));
 // Окна оболочки — не веб-страница: собственное меню по правой кнопке им не нужно.
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 

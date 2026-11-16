@@ -55,5 +55,17 @@
   "widget.weather.fog": "Fog",
   "widget.weather.rain": "Rain",
   "widget.weather.snow": "Snow",
-  "widget.weather.thunder": "Thunderstorm"
+  "widget.weather.thunder": "Thunderstorm",
+  "widget.notes": "Note",
+  "widget.notes.placeholder": "Write something down…",
+  "widget.todo": "To-do list",
+  "widget.todo.placeholder": "New task, then Enter",
+  "widget.timer": "Timer",
+  "widget.timer.start": "Start",
+  "widget.timer.pause": "Pause",
+  "widget.timer.reset": "Reset",
+  "widget.disks": "Disks",
+  "widget.disks.free": "free",
+  "widget.network": "Network",
+  "widget.network.units": "B/s,KB/s,MB/s"
 }

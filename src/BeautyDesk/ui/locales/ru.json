@@ -55,5 +55,17 @@
   "widget.weather.fog": "Туман",
   "widget.weather.rain": "Дождь",
   "widget.weather.snow": "Снег",
-  "widget.weather.thunder": "Гроза"
+  "widget.weather.thunder": "Гроза",
+  "widget.notes": "Заметка",
+  "widget.notes.placeholder": "Запишите что-нибудь…",
+  "widget.todo": "Список дел",
+  "widget.todo.placeholder": "Новое дело и Enter",
+  "widget.timer": "Таймер",
+  "widget.timer.start": "Старт",
+  "widget.timer.pause": "Пауза",
+  "widget.timer.reset": "Сброс",
+  "widget.disks": "Диски",
+  "widget.disks.free": "свободно",
+  "widget.network": "Сеть",
+  "widget.network.units": "Б/с,КБ/с,МБ/с"
 }

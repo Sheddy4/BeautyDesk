@@ -318,20 +318,43 @@ body.editing .widget-tools { display: flex; }
 body.editing .widget-body.configuring { pointer-events: auto; }
 
 /* Плеер */
-.widget-player .widget-body { justify-content: space-between; gap: 8px; }
-.player-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.player-cover { width: 56px; height: 56px; flex: none; border-radius: 8px; object-fit: cover; }
-.player-text { min-width: 0; }
+.widget-player .widget-body { position: relative; justify-content: space-between; gap: 10px; }
+/* Размытая обложка фоном: большой виджет не выглядит пустым, а текст поверх остаётся читаемым. */
+.player-backdrop {
+  position: absolute;
+  inset: -30px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) brightness(0.38) saturate(1.3);
+  pointer-events: none;
+}
+.player-main, .player-bars { position: relative; }
+.player-main { display: flex; align-items: center; gap: 14px; min-height: 0; }
+.player-art { flex: none; width: 96px; height: 96px; display: grid; place-items: center; background: var(--bd-control-bg); border-radius: 10px; overflow: hidden; }
+.player-cover { width: 100%; height: 100%; object-fit: cover; }
+.player-noart { color: var(--bd-muted); }
+.player-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .player-title, .player-artist { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.player-title { font-weight: 600; font-size: 1.1em; }
-.player-artist { color: var(--bd-muted); }
-.player-controls { display: flex; justify-content: center; gap: 10px; height: 28px; }
+.player-title { font-weight: 600; font-size: 1.15em; }
+.player-artist { color: var(--bd-muted); min-height: 1.2em; }
+.player-progress { height: 4px; margin-top: 6px; background: rgba(255, 255, 255, 0.18); border-radius: 2px; overflow: hidden; cursor: pointer; }
+.player-progress i { display: block; height: 100%; width: 0; background: var(--bd-fg); }
+.player-times { display: flex; justify-content: space-between; font-size: 0.8em; color: var(--bd-muted); font-variant-numeric: tabular-nums; }
+.no-timeline .player-progress, .no-timeline .player-times { visibility: hidden; }
+.player-controls { display: flex; gap: 6px; height: 28px; margin-left: -8px; }
 .player-controls button.plain { height: 28px; padding: 0 8px; }
 .widget-player .empty .player-controls { opacity: 0.35; pointer-events: none; }
-.player-bars { flex: 1; min-height: 28px; display: flex; align-items: flex-end; gap: 3px; }
-.player-bars i { flex: 1; min-height: 2px; background: var(--bd-accent); border-radius: 1px; opacity: 0.85; }
-.widget[data-size="4x2"] .player-cover { width: 40px; height: 40px; }
-.widget[data-size="4x2"] .player-bars { min-height: 18px; }
+.player-bars { flex: 1; min-height: 22px; display: flex; align-items: flex-end; gap: 3px; }
+.player-bars i { flex: 1; height: 4%; min-height: 2px; background: var(--bd-accent); border-radius: 1px; opacity: 0.9; }
+
+/* Средний размер: обложка меньше, времени под полосой перемотки нет. */
+.widget[data-size="4x2"] .player-art { width: 64px; height: 64px; border-radius: 8px; }
+.widget[data-size="4x2"] .player-times { display: none; }
+.widget[data-size="4x2"] .player-bars { min-height: 14px; }
+/* Самый большой: обложка сверху во всю ширину, под ней всё остальное. */
+.widget[data-size="4x4"] .player-main { flex-direction: column; align-items: stretch; }
+.widget[data-size="4x4"] .player-art { width: 100%; height: 150px; }
+.widget[data-size="4x4"] .player-controls { justify-content: center; margin-left: 0; }
 
 /* Монитор железа */
 .widget-hardware .widget-body { gap: 12px; }
@@ -368,6 +391,61 @@ body.editing .widget-body.configuring { pointer-events: auto; }
 .weather-form button.plain { align-self: flex-start; height: 26px; background: var(--bd-control-bg); }
 .widget[data-size="2x2"] .weather-details, .widget[data-size="2x2"] .weather-days { display: none; }
 .widget[data-size="2x2"] .weather-now { flex-direction: column; align-items: flex-start; gap: 6px; }
+
+/* Заметка */
+.widget-notes .widget-body { padding: 10px; justify-content: stretch; }
+.notes-text {
+  flex: 1;
+  width: 100%;
+  padding: 4px;
+  resize: none;
+  font: inherit;
+  line-height: 1.45;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bd-control-bg) transparent;
+}
+.notes-text::placeholder, .todo-input::placeholder { color: var(--bd-muted); }
+
+/* Список дел */
+.widget-todo .widget-body { justify-content: flex-start; gap: 8px; padding: 12px; }
+.todo-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--bd-control-bg) transparent; }
+.todo-item { display: flex; align-items: center; gap: 8px; padding: 4px 4px; border-radius: var(--bd-control-radius); }
+.todo-item:hover { background: var(--bd-control-bg); }
+.todo-check { flex: none; width: 14px; height: 14px; border: 1.5px solid var(--bd-muted); border-radius: 4px; }
+.todo-item.done .todo-check { background: var(--bd-accent); border-color: var(--bd-accent); }
+.todo-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.todo-item.done .todo-text { color: var(--bd-muted); text-decoration: line-through; }
+.todo-remove { visibility: hidden; padding: 0 4px; background: transparent; color: var(--bd-muted); }
+.todo-item:hover .todo-remove { visibility: visible; }
+.todo-input { flex: none; padding: 6px 10px; font: inherit; color: inherit; background: var(--bd-control-bg); border: 0; outline: 0; border-radius: var(--bd-control-radius); }
+
+/* Таймер */
+.widget-timer .widget-body { align-items: center; gap: 8px; }
+.timer-time { font-size: 2.8em; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.timer-presets, .timer-actions { display: flex; gap: 4px; }
+.timer-presets button.plain, .timer-actions button.plain { height: 24px; padding: 0 9px; background: var(--bd-control-bg); }
+.timer-presets button.active { background: var(--bd-accent); color: #fff; }
+.widget-timer .running .timer-presets { opacity: 0.4; pointer-events: none; }
+.widget-timer .finished .timer-time { color: var(--bd-danger); animation: bd-pulse 0.8s ease-in-out infinite; }
+.widget[data-size="2x2"] .timer-time { font-size: 2em; }
+.widget[data-size="2x2"] .timer-presets button.plain { padding: 0 6px; }
+@keyframes bd-pulse { 50% { opacity: 0.25; } }
+
+/* Диски — те же строки, что у монитора железа, только подпись шире */
+.widget-disks .widget-body { gap: 12px; }
+.widget-disks .hw-row { grid-template-columns: 2em 1fr auto; }
+.widget-disks .hw-value { min-width: 0; }
+
+/* Сеть */
+.widget-network .widget-body { gap: 8px; justify-content: space-between; }
+.net-speeds { display: flex; gap: 24px; font-size: 1.25em; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.net-arrow { margin-right: 6px; color: var(--bd-accent); }
+.net-graph { flex: 1; min-height: 20px; width: 100%; color: var(--bd-accent); }
+.widget[data-size="2x2"] .net-speeds { flex-direction: column; gap: 4px; font-size: 1.05em; }
 
 /* ---------- лаунчер ---------- */
 

@@ -62,6 +62,8 @@ internal sealed class DesktopHost
     private ShellWindow? _launcher;
     private IntPtr _launcherReturnTo;
     private bool _editingWidgets;
+    private HashSet<string> _statsInUse = [];
+    private int _statsTick;
     private Dock? _dock;
     private DockController? _dockController;
     private int _dockIconsVersion = -1;
@@ -97,7 +99,7 @@ internal sealed class DesktopHost
         _system.Changed += () => { Publish("sys", _system.Current); KeepWidgetsOnDesktop(); };
         _media.Changed += () => { Publish("media", _media.Current); UpdateVisibility(); };
         _spectrum.Changed += levels => Publish("audio", levels);
-        _hardwareTimer.Tick += (_, _) => Publish("hw", _hardware.Read());
+        _hardwareTimer.Tick += (_, _) => PublishStats();
 
         _environment = await CoreWebView2Environment.CreateAsync(null, AppPaths.WebViewData);
         await BuildWindowsAsync();
@@ -333,7 +335,7 @@ internal sealed class DesktopHost
     private static ShellRole[] RolesFor(string topic) => topic switch
     {
         "media" => [ShellRole.Island, ShellRole.Desktop], // «остров» и виджет плеера
-        "audio" or "hw" => [ShellRole.Desktop],
+        "audio" or "hw" or "net" or "disks" => [ShellRole.Desktop],
         "launcher" => [ShellRole.Launcher],
         "dock" or "dockIcons" or "dockHold" => [ShellRole.Dock],
         "menu" => [ShellRole.Menu],
@@ -481,6 +483,10 @@ internal sealed class DesktopHost
 
             case "widgetsEdit" when message.TryGetProperty("value", out var edit):
                 SetWidgetEditing(edit.ValueKind == JsonValueKind.True);
+                break;
+
+            case "log":
+                Log.Write($"Ошибка на странице {window.Role}: {Text(message, "text")}");
                 break;
 
             case "volumeStep":
@@ -735,17 +741,26 @@ internal sealed class DesktopHost
         bool running = _fullscreenMonitor == IntPtr.Zero;
 
         _spectrum.SetActive(running && inUse.Contains("player"));
-        if (running && inUse.Contains("hardware"))
+
+        _statsInUse = inUse;
+        bool stats = running && (inUse.Contains("hardware") || inUse.Contains("network") || inUse.Contains("disks"));
+        if (stats && !_hardwareTimer.IsEnabled)
         {
-            if (!_hardwareTimer.IsEnabled)
-            {
-                var now = _hardware.Read();
-                Log.Write($"Монитор железа: память {now.MemoryUsedGb}/{now.MemoryTotalGb} ГБ, видеокарта {now.GpuName ?? "нет данных"}, {now.GpuTemperature?.ToString() ?? "—"} °C");
-                Publish("hw", now);
-                _hardwareTimer.Start();
-            }
+            _statsTick = 0;
+            PublishStats();
+            _hardwareTimer.Start();
         }
-        else _hardwareTimer.Stop();
+        else if (!stats) _hardwareTimer.Stop();
+    }
+
+    /// <summary>Показатели для виджетов «Монитор железа», «Сеть» и «Диски» — только для тех, что стоят на столе.</summary>
+    private void PublishStats()
+    {
+        if (_statsInUse.Contains("hardware")) Publish("hw", _hardware.Read());
+        if (_statsInUse.Contains("network")) Publish("net", _hardware.ReadNetwork());
+        // Место на дисках меняется медленно — раз в полминуты достаточно.
+        if (_statsInUse.Contains("disks") && _statsTick % 20 == 0) Publish("disks", HardwareInfo.ReadDisks());
+        _statsTick++;
     }
 
     private async Task SendWeatherAsync(ShellWindow window, string city)

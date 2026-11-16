@@ -1,3 +1,5 @@
+using System.IO;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -15,6 +17,11 @@ internal sealed class HardwareInfo : IDisposable
     /// <param name="Gpu">Загрузка видеокарты, 0–100; null — данных нет.</param>
     /// <param name="GpuTemperature">Температура видеокарты в °C; null — данных нет.</param>
     public sealed record Snapshot(int Cpu, int Memory, double MemoryUsedGb, double MemoryTotalGb, int? Gpu, int? GpuTemperature, string? GpuName);
+
+    public sealed record Disk(string Name, double FreeGb, double TotalGb);
+
+    /// <summary>Скорость сети в байтах в секунду.</summary>
+    public sealed record NetworkSpeed(long Down, long Up);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct FILETIME { public uint Low, High; public readonly ulong Value => ((ulong)High << 32) | Low; }
@@ -90,6 +97,56 @@ internal sealed class HardwareInfo : IDisposable
         return new Snapshot(cpu, (int)memory.MemoryLoad,
             Math.Round((memory.TotalPhys - memory.AvailPhys) / Gb, 1), Math.Round(memory.TotalPhys / Gb, 1),
             gpu, temperature, _gpuName);
+    }
+
+    /// <summary>Встроенные диски и свободное место на них.</summary>
+    public static IReadOnlyList<Disk> ReadDisks()
+    {
+        const double Gb = 1024.0 * 1024 * 1024;
+        var disks = new List<Disk>();
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            try
+            {
+                if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
+                disks.Add(new Disk(drive.Name.TrimEnd('\\'), Math.Round(drive.AvailableFreeSpace / Gb), Math.Round(drive.TotalSize / Gb)));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return disks;
+    }
+
+    private readonly Dictionary<string, (long Received, long Sent)> _traffic = [];
+    private DateTime _trafficAt;
+
+    /// <summary>
+    /// Скорость сети с прошлого вызова. Берётся самый нагруженный адаптер, а не сумма по всем:
+    /// при включённом VPN один и тот же трафик идёт и через настоящий адаптер, и через виртуальный.
+    /// </summary>
+    public NetworkSpeed ReadNetwork()
+    {
+        var now = DateTime.UtcNow;
+        double seconds = (now - _trafficAt).TotalSeconds;
+        bool first = _trafficAt == default || seconds <= 0;
+        _trafficAt = now;
+
+        long down = 0, up = 0;
+        try
+        {
+            foreach (var adapter in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (adapter.OperationalStatus != OperationalStatus.Up || adapter.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                var stats = adapter.GetIPStatistics();
+                if (_traffic.TryGetValue(adapter.Id, out var before) && !first)
+                {
+                    long received = stats.BytesReceived - before.Received, sent = stats.BytesSent - before.Sent;
+                    if (received + sent > down + up) { down = Math.Max(0, received); up = Math.Max(0, sent); }
+                }
+                _traffic[adapter.Id] = (stats.BytesReceived, stats.BytesSent);
+            }
+        }
+        catch (NetworkInformationException) { }
+        return first ? new NetworkSpeed(0, 0) : new NetworkSpeed((long)(down / seconds), (long)(up / seconds));
     }
 
     public void Dispose()
