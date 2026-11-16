@@ -1,14 +1,21 @@
-/* macOS-стекло: скругления и светлая полупрозрачная тонировка. Размытие фона — задача этапа 6. */
+/*
+  Стекло (тёмное): панель и док — матовое стекло с размытием того, что под ними
+  ("backdrop": "blur" в theme.json). Виджеты, меню и лаунчер размытия не получают.
+*/
 :root {
   --bd-font: "Segoe UI Variable", "Segoe UI", sans-serif;
   --bd-font-size: 13px;
   --bd-fg: #ffffff;
   --bd-muted: rgba(255, 255, 255, 0.6);
   --bd-accent: #0a84ff;
-  --bd-surface: rgba(60, 60, 68, 0.62);
-  --bd-border: 1px solid rgba(255, 255, 255, 0.18);
-  --bd-radius: 18px;
+  --bd-surface: rgba(40, 40, 46, 0.55);
+  --bd-border: 1px solid rgba(255, 255, 255, 0.16);
+  --bd-radius: 16px;
   --bd-menu-bg: rgb(44, 44, 50);
   --bd-control-bg: rgba(255, 255, 255, 0.14);
   --bd-control-radius: 6px;
 }
+/* Размытие уже отделяет панель и док от фона — тонировка поверх него лёгкая. */
+#bar { background: rgba(30, 30, 36, 0.35); }
+/* Размытую подложку дока скругляет сама Windows, и радиус у неё один — 8 px. */
+#dock::before { background: rgba(30, 30, 36, 0.3); border-radius: 8px; }

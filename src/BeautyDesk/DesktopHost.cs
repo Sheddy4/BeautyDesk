@@ -43,6 +43,7 @@ internal sealed class DesktopHost
 
     private readonly Settings _settings = Settings.Load();
     private readonly List<ShellWindow> _windows = [];
+    private readonly Dictionary<ShellWindow, BackdropWindow> _dockBackdrops = [];
     private readonly Dictionary<string, string> _topics = [];
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly DispatcherTimer _displayChanged = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -140,6 +141,8 @@ internal sealed class DesktopHost
         CloseMenu();
         foreach (var w in _windows) w.Close();
         _windows.Clear();
+        foreach (var b in _dockBackdrops.Values) b.Close();
+        _dockBackdrops.Clear();
         _menu?.Close();
         _launcher?.Close();
         _winKey?.Dispose();
@@ -163,6 +166,8 @@ internal sealed class DesktopHost
         CloseLauncher();
         foreach (var w in _windows) w.Close();
         _windows.Clear();
+        foreach (var b in _dockBackdrops.Values) b.Close();
+        _dockBackdrops.Clear();
         _menu?.Close();
         _launcher?.Close();
 
@@ -174,11 +179,13 @@ internal sealed class DesktopHost
             window.MessageReceived += OnMessage;
             _windows.Add(window);
             // «Остров» появляется, только когда что-то играет.
-            await window.InitAsync(_environment!, BoundsFor(window), startHidden: role == ShellRole.Island);
+            await window.InitAsync(_environment!, BoundsFor(window), startHidden: role == ShellRole.Island,
+                blur: role == ShellRole.Bar && CurrentTheme.Blur, tint: CurrentTheme.BlurTint);
             if (role == ShellRole.Island) ClipIsland(window);
             // Окна дока и виджетов больше того, что в них нарисовано; пока страница не сообщила,
             // где именно, окно пропускает все клики.
             if (role is ShellRole.Dock or ShellRole.Desktop) window.SetClip(new Native.RECT { Right = 1, Bottom = 1 });
+            if (role == ShellRole.Dock) _dockBackdrops[window] = new BackdropWindow();
         }
 
         // Меню одно на все экраны: создаётся заранее, чтобы открываться без задержки.
@@ -276,6 +283,8 @@ internal sealed class DesktopHost
         {
             bool shown = w.Monitor.Handle != _fullscreenMonitor && (w.Role != ShellRole.Island || _media.Current is not null);
             w.SetShown(shown);
+            // Спрятанный док уносит с собой и размытую подложку; при показе страница пришлёт её место заново.
+            if (!shown && _dockBackdrops.TryGetValue(w, out var backdrop)) backdrop.Update(null, IntPtr.Zero);
         }
         // «Остров» лежит поверх панели, а не под ней.
         foreach (var w in _windows.Where(w => w.Role == ShellRole.Island && w.IsVisible)) w.Raise();
@@ -379,6 +388,7 @@ internal sealed class DesktopHost
             monitor = window.Monitor.Index + 1,
             // Метка времени в адресе заставляет страницу перечитать стили после правок в папке темы.
             theme = new { id = theme.Id, css = $"{theme.CssUrl}?v={File.GetLastWriteTimeUtc(Path.Combine(theme.Dir, "theme.css")).Ticks}" },
+            blur = theme.Blur,
             barHeight = theme.BarHeight,
             dockHeight = theme.DockHeight,
             dockMargin = DockBottomMargin,
@@ -465,6 +475,15 @@ internal sealed class DesktopHost
                 }).ToList());
                 break;
             }
+
+            case "surface" when window.Role == ShellRole.Dock && _dockBackdrops.TryGetValue(window, out var backdrop):
+                // Страница дока сообщает, где сейчас его подложка, — под неё ставится размытие.
+                backdrop.SetTint(CurrentTheme.BlurTint);
+                backdrop.Update(
+                    CurrentTheme.Blur && window.IsVisible && message.TryGetProperty("rect", out var surface) && surface.ValueKind == JsonValueKind.Object
+                        ? ToScreen(window, surface) : null,
+                    window.Handle);
+                break;
 
             case "widgetsSave" when window.Role == ShellRole.Desktop && message.TryGetProperty("widgets", out var saved):
                 _settings.Widgets[window.Monitor.Device] = JsonSerializer.Deserialize<List<WidgetPlacement>>(saved.GetRawText(), Json) ?? [];
@@ -841,7 +860,9 @@ internal sealed class DesktopHost
         {
             w.SetBounds(BoundsFor(w));
             if (w.Role == ShellRole.Island) ClipIsland(w);
+            if (w.Role == ShellRole.Bar) w.SetBlur(CurrentTheme.Blur, CurrentTheme.BlurTint);
         }
+        if (!CurrentTheme.Blur) foreach (var b in _dockBackdrops.Values) b.Update(null, IntPtr.Zero);
         ApplyWallpaper();
         Broadcast();
         Log.Write($"Тема: {id}");

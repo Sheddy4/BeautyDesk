@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace BeautyDesk;
 
 /// <summary>
-/// Тема — папка с theme.json (название, размеры, обои) и theme.css (цвета, шрифты, стили).
+/// Тема — папка с theme.json (название, размеры, обои, размытие) и theme.css (цвета, шрифты, стили).
 /// Встроенные темы лежат рядом с программой, пользовательские — в %APPDATA%\BeautyDesk\themes.
 /// </summary>
 internal sealed record Theme(
@@ -14,7 +14,9 @@ internal sealed record Theme(
     IReadOnlyDictionary<string, string> Names,
     double BarHeight,
     double DockHeight,
-    string? WallpaperPath)
+    string? WallpaperPath,
+    bool Blur,
+    uint BlurTint)
 {
     public const string BuiltInHost = "themes.beautydesk.example";
     public const string UserHost = "userthemes.beautydesk.example";
@@ -76,13 +78,25 @@ internal static class Themes
                 Names: names,
                 BarHeight: Number(root, "barHeight", 30, 20, 80),
                 DockHeight: Number(root, "dockHeight", 64, 32, 200),
-                WallpaperPath: wallpaper);
+                WallpaperPath: wallpaper,
+                // "backdrop": "blur" — матовое стекло: под панелью, доком и виджетами всё размыто.
+                Blur: root.TryGetProperty("backdrop", out var backdrop) && backdrop.GetString() == "blur",
+                // "backdropTint": "#RRGGBB" — оттенок стекла; по умолчанию тёмно-серый.
+                BlurTint: root.TryGetProperty("backdropTint", out var tint) ? ParseTint(tint.GetString()) : Backdrop.DefaultTint);
         }
         catch (Exception e) when (e is IOException or JsonException or InvalidOperationException)
         {
             Log.Write($"Тема в {dir} пропущена: {e.Message}");
             return null;
         }
+    }
+
+    /// <summary>Переводит цвет вида #RRGGBB в порядок байтов Windows (0xBBGGRR).</summary>
+    private static uint ParseTint(string? text)
+    {
+        if (text is { Length: 7 } && text[0] == '#' && uint.TryParse(text.AsSpan(1), System.Globalization.NumberStyles.HexNumber, null, out var rgb))
+            return ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | (rgb >> 16);
+        return Backdrop.DefaultTint;
     }
 
     private static double Number(JsonElement root, string key, double fallback, double min, double max) =>

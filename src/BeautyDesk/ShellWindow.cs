@@ -27,12 +27,15 @@ internal sealed class ShellWindow : Window
     private bool _appBarRegistered;
     private Native.RECT _bounds;
     private bool _aboveWindows;
+    private bool _blur;
+    private uint _tint = Backdrop.DefaultTint;
 
     public ShellRole Role { get; }
     /// <summary>Экран, на котором окно сейчас стоит. Меню одно на все экраны и переезжает между ними.</summary>
     public MonitorInfo Monitor { get; set; }
     /// <summary>Положение окна на экране в физических пикселях.</summary>
     public Native.RECT Bounds => _bounds;
+    public IntPtr Handle => _hwnd;
     /// <summary>Для «острова»: развёрнут ли он сейчас.</summary>
     public bool Expanded { get; set; }
 
@@ -57,7 +60,8 @@ internal sealed class ShellWindow : Window
         Content = _web;
     }
 
-    public async Task InitAsync(CoreWebView2Environment environment, Native.RECT bounds, bool startHidden = false)
+    /// <param name="blur">Окно сразу создаётся с размытием (тема с «матовым стеклом»).</param>
+    public async Task InitAsync(CoreWebView2Environment environment, Native.RECT bounds, bool startHidden = false, bool blur = false, uint tint = Backdrop.DefaultTint)
     {
         _hwnd = new WindowInteropHelper(this).EnsureHandle();
         var source = HwndSource.FromHwnd(_hwnd)!;
@@ -69,7 +73,10 @@ internal sealed class ShellWindow : Window
         if (!TakesFocus) ex |= Native.WS_EX_NOACTIVATE;
         Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(ex));
 
-        MakeTransparent();
+        _blur = blur;
+        _tint = tint;
+        if (blur) Backdrop.Apply(_hwnd, true, tint);
+        else SetSeeThrough(true);
         _bounds = bounds;
         if (!startHidden)
         {
@@ -141,6 +148,17 @@ internal sealed class ShellWindow : Window
             Native.DeleteObject(part);
         }
         Native.SetWindowRgn(_hwnd, region, true);
+    }
+
+    /// <summary>Включает или выключает размытие того, что под окном (для тем с «матовым стеклом»).</summary>
+    public void SetBlur(bool blur, uint tint = Backdrop.DefaultTint)
+    {
+        if (blur == _blur && tint == _tint) return;
+        // Размытие и «прозрачность насквозь» включаются разными средствами и вместе не работают.
+        if (blur != _blur) SetSeeThrough(!blur);
+        _blur = blur;
+        _tint = tint;
+        Backdrop.Apply(_hwnd, blur, tint);
     }
 
     /// <summary>
@@ -301,9 +319,18 @@ internal sealed class ShellWindow : Window
 
     // ---------- прозрачность ----------
 
-    private void MakeTransparent()
+    /// <summary>Делает окно прозрачным насквозь там, где страница ничего не нарисовала.</summary>
+    private void SetSeeThrough(bool on)
     {
-        // Пустая область размытия делает окно насквозь прозрачным там, где страница ничего не нарисовала.
+        if (!on)
+        {
+            // Выключение — обычным способом, без области: иначе окно остаётся в непрозрачном состоянии
+            // и размытие под ним превращается в чёрную заливку.
+            var off = new Native.DWM_BLURBEHIND { dwFlags = Native.DWM_BB_ENABLE, fEnable = false };
+            Native.DwmEnableBlurBehindWindow(_hwnd, ref off);
+            return;
+        }
+        // Приём: «размытие» с пустой областью. Размытия нет, зато окно перестаёт быть непрозрачным.
         var region = Native.CreateRectRgn(0, 0, -1, -1);
         var blur = new Native.DWM_BLURBEHIND
         {

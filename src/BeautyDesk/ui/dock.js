@@ -104,10 +104,36 @@ if (BD.role === 'dock') {
     clipTimer = setTimeout(() => { clip = rect; BD.send({ type: 'clip', rect }); }, hovered ? 0 : 230);
   }
 
+  let lastSurface = '';
+  let surfaceUntil = 0;
+
+  /**
+   * В темах с «матовым стеклом» под подложку дока программа подкладывает размытие — ей нужно знать,
+   * где подложка сейчас. Пока иконки растут или док выезжает, место меняется каждый кадр.
+   */
+  function reportSurface() {
+    let message = { type: 'surface', rect: null };
+    if (BD.state?.blur) {
+      const r = strip.getBoundingClientRect();
+      message = { type: 'surface', rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
+    }
+    const key = JSON.stringify(message);
+    if (key !== lastSurface) { lastSurface = key; BD.send(message); }
+    if (performance.now() < surfaceUntil) requestAnimationFrame(reportSurface);
+  }
+
+  /** Следить за подложкой ещё какое-то время: столько длятся анимации размера и выезда. */
+  function trackSurface(ms = 400) {
+    const running = performance.now() < surfaceUntil;
+    surfaceUntil = performance.now() + ms;
+    if (!running) requestAnimationFrame(reportSurface);
+  }
+
   function refresh() {
     document.body.classList.toggle('dock-hidden', isHidden());
     layout();
     updateClip();
+    trackSurface();
   }
 
   function setHovered(value, x = null) {
@@ -226,7 +252,7 @@ if (BD.role === 'dock') {
   document.addEventListener('mousemove', (event) => {
     if (!hovered) { setHovered(true, event.clientX); return; }
     mouseX = event.clientX;
-    if (!frame) frame = requestAnimationFrame(() => { frame = 0; layout(); });
+    if (!frame) frame = requestAnimationFrame(() => { frame = 0; layout(); trackSurface(200); });
   });
   window.addEventListener('resize', refresh);
 
@@ -241,5 +267,5 @@ if (BD.role === 'dock') {
   BD.on('dockHold', (data) => { held = data.value; refresh(); });
   BD.on('dock', (data) => { items = data.items; render(); });
   BD.on('dockIcons', (data) => { icons = data; render(); });
-  BD.on('state', () => { pendingClip = ''; render(); });
+  BD.on('state', () => { pendingClip = ''; lastSurface = ''; render(); });
 }

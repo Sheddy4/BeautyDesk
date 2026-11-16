@@ -4,5 +4,6 @@
     "en": "Glass"
   },
   "barHeight": 28,
-  "dockHeight": 68
+  "dockHeight": 68,
+  "backdrop": "blur"
 }
