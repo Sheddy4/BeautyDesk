@@ -1,0 +1,26 @@
+/*
+  Стекло (светлое): то же матовое стекло, что в тёмном варианте, но светлое —
+  тёмный текст на светлой размытой подложке ("backdropTint" в theme.json).
+*/
+:root {
+  --bd-font: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --bd-font-size: 13px;
+  --bd-fg: #1c1c1e;
+  --bd-muted: rgba(28, 28, 30, 0.58);
+  --bd-accent: #007aff;
+  --bd-danger: #ff3b30;
+  --bd-surface: rgba(255, 255, 255, 0.62);
+  --bd-border: 1px solid rgba(0, 0, 0, 0.1);
+  --bd-radius: 16px;
+  --bd-menu-bg: #f2f2f7;
+  --bd-control-bg: rgba(0, 0, 0, 0.07);
+  --bd-control-radius: 6px;
+}
+/* Размытие уже отделяет панель и док от фона — тонировка поверх него лёгкая. */
+#bar { background: rgba(255, 255, 255, 0.3); }
+/* Размытую подложку дока скругляет сама Windows, и радиус у неё один — 8 px. */
+#dock::before { background: rgba(255, 255, 255, 0.28); border-radius: 8px; }
+/* Полосы на тёмной размытой обложке плеера остаются светлыми. */
+.widget-player { color: #fff; }
+.widget-player .player-artist, .widget-player .player-times { color: rgba(255, 255, 255, 0.65); }
+.player-backdrop:not([style*="url"]) { background: #3a3a44; }

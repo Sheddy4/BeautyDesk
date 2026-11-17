@@ -78,6 +78,7 @@ if (BD.role === 'bar') {
     const tray = $('tray'), more = $('tray-more');
     for (const img of trayElements.values()) img.hidden = false;
     more.hidden = true;
+    if (tray.hidden) return;
     const needed = trayItems.length * TRAY_SLOT;
     trayHidden = [];
     if (needed > tray.clientWidth + 1) {
@@ -100,6 +101,14 @@ if (BD.role === 'bar') {
 
   BD.on('sys', (data) => { sys = data; renderSys(); });
   BD.on('tray', renderTray);
-  BD.on('state', () => { renderSys(); renderClock(); });
+  BD.on('state', (state) => {
+    // Что показывать на панели, выбирается в настройках.
+    $('tray').hidden = !state.showTray;
+    if (!state.showTray) $('tray-more').hidden = true;
+    document.body.classList.toggle('no-layout', !state.showLayout);
+    renderSys();
+    renderClock();
+    fitTray();
+  });
   setInterval(renderClock, 1000);
 }

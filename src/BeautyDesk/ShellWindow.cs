@@ -9,8 +9,8 @@ using Microsoft.Web.WebView2.Wpf;
 namespace BeautyDesk;
 
 /// <summary>Bar — верхняя панель, Dock — док, Island — «остров» с музыкой поверх панели, Menu — выпадающее меню, Launcher — лаунчер по клавише Win,
-/// Desktop — слой виджетов на рабочем столе.</summary>
-internal enum ShellRole { Bar, Dock, Island, Menu, Launcher, Desktop }
+/// Desktop — слой виджетов на рабочем столе, Settings — окно настроек.</summary>
+internal enum ShellRole { Bar, Dock, Island, Menu, Launcher, Desktop, Settings }
 
 /// <summary>
 /// Одно окно оболочки. Само окно пустое и прозрачное, всё видимое рисует веб-страница внутри WebView2.
@@ -41,8 +41,9 @@ internal sealed class ShellWindow : Window
 
     public event Action<ShellWindow, JsonElement>? MessageReceived;
 
-    // В лаунчере печатают, поэтому ему, в отличие от остальных окон оболочки, нужен фокус клавиатуры.
-    private bool TakesFocus => Role == ShellRole.Launcher;
+    // В лаунчере печатают, а окно настроек закрывают клавишей Esc — им, в отличие от остальных окон
+    // оболочки, нужен фокус клавиатуры.
+    private bool TakesFocus => Role is ShellRole.Launcher or ShellRole.Settings;
 
     public ShellWindow(ShellRole role, MonitorInfo monitor)
     {

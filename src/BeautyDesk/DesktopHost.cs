@@ -27,6 +27,7 @@ internal sealed class DesktopHost
     private const double DockWindowHeightFactor = 2.4;
     private const double MenuWideWidth = 300;
     private const double LauncherWidth = 720, LauncherHeight = 560;
+    private const double SettingsWidth = 620, SettingsHeight = 640;
     private const int LauncherWarmIcons = 48;
     private const int TrayGridColumns = 5;
     private const double TrayGridCell = 34;
@@ -61,6 +62,7 @@ internal sealed class DesktopHost
     private readonly AppCatalog _apps = new();
     private WinKey? _winKey;
     private ShellWindow? _launcher;
+    private ShellWindow? _settingsWindow;
     private IntPtr _launcherReturnTo;
     private bool _editingWidgets;
     private HashSet<string> _statsInUse = [];
@@ -70,6 +72,7 @@ internal sealed class DesktopHost
     private int _dockIconsVersion = -1;
     private int _tick;
     private string? _menuOwner;
+    private ShellWindow? _menuFrom;
     private IntPtr _fullscreenMonitor;
     private HashSet<IntPtr> _maximizedMonitors = [];
     private Native.RECT _menuAnchor;
@@ -145,6 +148,7 @@ internal sealed class DesktopHost
         _dockBackdrops.Clear();
         _menu?.Close();
         _launcher?.Close();
+        _settingsWindow?.Close();
         _winKey?.Dispose();
         _dockController?.Close();
         _hardwareTimer.Stop();
@@ -170,6 +174,7 @@ internal sealed class DesktopHost
         _dockBackdrops.Clear();
         _menu?.Close();
         _launcher?.Close();
+        _settingsWindow?.Close();
 
         var monitors = Monitors.All();
         foreach (var monitor in monitors)
@@ -196,6 +201,10 @@ internal sealed class DesktopHost
         _launcher = new ShellWindow(ShellRole.Launcher, monitors[0]);
         _launcher.MessageReceived += OnMessage;
         await _launcher.InitAsync(_environment!, default, startHidden: true);
+
+        _settingsWindow = new ShellWindow(ShellRole.Settings, monitors[0]);
+        _settingsWindow.MessageReceived += OnMessage;
+        await _settingsWindow.InitAsync(_environment!, default, startHidden: true);
     }
 
     private static int Px(MonitorInfo monitor, double units) => (int)Math.Round(units * monitor.Scale);
@@ -281,7 +290,8 @@ internal sealed class DesktopHost
     {
         foreach (var w in _windows)
         {
-            bool shown = w.Monitor.Handle != _fullscreenMonitor && (w.Role != ShellRole.Island || _media.Current is not null);
+            bool shown = w.Monitor.Handle != _fullscreenMonitor
+                         && (w.Role != ShellRole.Island || (_media.Current is not null && _settings.ShowIsland));
             w.SetShown(shown);
             // Спрятанный док уносит с собой и размытую подложку; при показе страница пришлёт её место заново.
             if (!shown && _dockBackdrops.TryGetValue(w, out var backdrop)) backdrop.Update(null, IntPtr.Zero);
@@ -346,12 +356,13 @@ internal sealed class DesktopHost
         "media" => [ShellRole.Island, ShellRole.Desktop], // «остров» и виджет плеера
         "audio" or "hw" or "net" or "disks" => [ShellRole.Desktop],
         "launcher" => [ShellRole.Launcher],
+        "settings" => [ShellRole.Settings],
         "dock" or "dockIcons" or "dockHold" => [ShellRole.Dock],
         "menu" => [ShellRole.Menu],
         _ => [ShellRole.Bar]
     };
 
-    private IEnumerable<ShellWindow> AllWindows => _windows.Concat(new[] { _menu, _launcher }.OfType<ShellWindow>());
+    private IEnumerable<ShellWindow> AllWindows => _windows.Concat(new[] { _menu, _launcher, _settingsWindow }.OfType<ShellWindow>());
 
     /// <summary>Рассылает данные страницам; повтор тех же данных не отправляется.</summary>
     private void Publish(string topic, object? data)
@@ -398,6 +409,8 @@ internal sealed class DesktopHost
             strings = Strings(_settings.Language),
             widgets = window.Role == ShellRole.Desktop ? WidgetsFor(window.Monitor) : null,
             editing = window.Role == ShellRole.Desktop && _editingWidgets,
+            showTray = _settings.ShowTray,
+            showLayout = _settings.ShowLayout,
             paused = _fullscreenMonitor != IntPtr.Zero
         }, Json);
     }
@@ -508,6 +521,18 @@ internal sealed class DesktopHost
                 Log.Write($"Ошибка на странице {window.Role}: {Text(message, "text")}");
                 break;
 
+            case "setting" when Text(message, "key") is { } settingKey && message.TryGetProperty("value", out var settingValue):
+                ApplySetting(settingKey, settingValue);
+                break;
+
+            case "chooseWallpaper":
+                ChooseWallpaper();
+                break;
+
+            case "settingsClose":
+                _settingsWindow?.SetShown(false);
+                break;
+
             case "volumeStep":
                 _system.StepVolume(Number(message, "delta"));
                 break;
@@ -581,8 +606,7 @@ internal sealed class DesktopHost
         string T(string key) => s.GetValueOrDefault(key, key);
         return
         [
-            new("theme", $"{T("menu.theme")}: {CurrentTheme.NameFor(_settings.Language)}"),
-            new("language", $"{T("menu.language")}: {_settings.Language.ToUpperInvariant()}"),
+            new("settings", T("menu.settings")),
             new("widgets", T(_editingWidgets ? "menu.widgetsDone" : "menu.widgets")),
             new("", Separator: true),
             new("lock", T("menu.lock")),
@@ -634,6 +658,7 @@ internal sealed class DesktopHost
 
         _menuAnchor = anchor;
         _menuOwner = owner;
+        _menuFrom = from;
         _menu.Monitor = monitor;
         _menu.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
         _menu.Post(StateJson(_menu));
@@ -693,21 +718,6 @@ internal sealed class DesktopHost
             return;
         }
 
-        switch (id)
-        {
-            // Тема и язык меняются на месте, меню остаётся открытым с обновлёнными подписями.
-            case "theme":
-                var ids = _themes.Select(t => t.Id).ToList();
-                SetTheme(ids[(ids.IndexOf(CurrentTheme.Id) + 1) % ids.Count]);
-                Publish("menu", new { items = SystemMenuItems() });
-                return;
-            case "language":
-                var languages = Languages();
-                SetLanguage(languages[(languages.IndexOf(_settings.Language) + 1) % languages.Count]);
-                Publish("menu", new { items = SystemMenuItems() });
-                return;
-        }
-
         CloseMenu();
         switch (id)
         {
@@ -715,6 +725,7 @@ internal sealed class DesktopHost
             case "sleep": Native.SetSuspendState(false, false, false); break;
             case "restart": Shutdown("/r /t 0"); break;
             case "shutdown": Shutdown("/s /t 0"); break;
+            case "settings": if (_menuFrom is not null) ToggleSettings(_menuFrom); break;
             case "widgets": SetWidgetEditing(!_editingWidgets); break;
             case "quit": Exit(); break;
         }
@@ -843,9 +854,106 @@ internal sealed class DesktopHost
     private void PublishLauncher()
     {
         PublishDock(); // со списком программ док может дозагрузить иконки приложений из Магазина
-        Publish("launcher", new { apps = _apps.Apps, pinned = _settings.LauncherPins });
+        Publish("launcher", new { apps = _apps.Apps, pinned = _settings.LauncherPins, showSystem = _settings.LauncherSystemApps });
         // Иконки первого экрана и закреплённых программ готовятся заранее, чтобы при открытии не появляться с задержкой.
         _apps.LoadIcons(_settings.LauncherPins.Concat(_apps.Apps.Where(a => !a.System).Take(LauncherWarmIcons).Select(a => a.Id)).ToList(), _ => { });
+    }
+
+    // ---------- окно настроек ----------
+
+    private const string AutostartKey = @"Software\Microsoft\Windows\CurrentVersion\Run", AutostartName = "BeautyDesk";
+
+    private static bool Autostart
+    {
+        get
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(AutostartKey);
+            return key?.GetValue(AutostartName) is not null;
+        }
+        set
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(AutostartKey);
+            if (value) key.SetValue(AutostartName, $"\"{Environment.ProcessPath}\"");
+            else key.DeleteValue(AutostartName, throwOnMissingValue: false);
+        }
+    }
+
+    private void ToggleSettings(ShellWindow from)
+    {
+        if (_settingsWindow is null) return;
+        if (_settingsWindow.IsVisible) { _settingsWindow.SetShown(false); return; }
+
+        var monitor = from.Monitor;
+        var m = monitor.Bounds;
+        int width = Math.Min(Px(monitor, SettingsWidth), m.Width), height = Math.Min(Px(monitor, SettingsHeight), m.Height - Px(monitor, 120));
+        int left = m.Left + (m.Width - width) / 2, top = m.Top + (m.Height - height) / 2;
+        _settingsWindow.Monitor = monitor;
+        _settingsWindow.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
+        _settingsWindow.Post(StateJson(_settingsWindow));
+        PublishSettings();
+        _settingsWindow.ShowFocused();
+    }
+
+    private void PublishSettings() => Publish("settings", new
+    {
+        themes = _themes.Select(t => new { id = t.Id, name = t.NameFor(_settings.Language) }),
+        theme = CurrentTheme.Id,
+        languages = Languages(),
+        language = _settings.Language,
+        wallpaperMode = _settings.WallpaperMode,
+        wallpaper = _settings.Wallpaper,
+        autostart = Autostart,
+        showDesktopIcons = _settings.ShowDesktopIcons,
+        showIsland = _settings.ShowIsland,
+        showTray = _settings.ShowTray,
+        showLayout = _settings.ShowLayout,
+        showTrash = _settings.ShowTrash,
+        launcherSystemApps = _settings.LauncherSystemApps,
+        version = typeof(DesktopHost).Assembly.GetName().Version?.ToString(3) ?? ""
+    });
+
+    /// <summary>Страница настроек изменила одно значение — применяем его сразу.</summary>
+    private void ApplySetting(string key, JsonElement value)
+    {
+        bool flag = value.ValueKind == JsonValueKind.True;
+        string? text = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        switch (key)
+        {
+            case "theme": SetTheme(text); break;
+            case "language": SetLanguage(text); break;
+            case "wallpaperMode" when text is "theme" or "custom" or "none":
+                _settings.WallpaperMode = text;
+                ApplyWallpaper();
+                break;
+            case "autostart": Autostart = flag; break;
+            case "showDesktopIcons":
+                _settings.ShowDesktopIcons = flag;
+                ShellState.KeepHidden(!flag);
+                break;
+            case "showIsland": _settings.ShowIsland = flag; UpdateVisibility(); break;
+            case "showTray": _settings.ShowTray = flag; Broadcast(); break;
+            case "showLayout": _settings.ShowLayout = flag; Broadcast(); break;
+            case "showTrash": _settings.ShowTrash = flag; PublishDock(); break;
+            case "launcherSystemApps": _settings.LauncherSystemApps = flag; PublishLauncher(); break;
+            default: return;
+        }
+        _settings.Save();
+        PublishSettings();
+    }
+
+    private void ChooseWallpaper()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp;*.webp",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog() != true) return;
+        _settings.Wallpaper = dialog.FileName;
+        _settings.WallpaperMode = "custom";
+        _settings.Save();
+        ApplyWallpaper();
+        PublishSettings();
     }
 
     // ---------- тема, язык, обои ----------
@@ -865,6 +973,7 @@ internal sealed class DesktopHost
         if (!CurrentTheme.Blur) foreach (var b in _dockBackdrops.Values) b.Update(null, IntPtr.Zero);
         ApplyWallpaper();
         Broadcast();
+        PublishSettings();
         Log.Write($"Тема: {id}");
     }
 
@@ -874,12 +983,18 @@ internal sealed class DesktopHost
         _settings.Language = language;
         _settings.Save();
         Broadcast();
+        PublishSettings();
         Log.Write($"Язык: {language}");
     }
 
     private void ApplyWallpaper()
     {
-        var path = _settings.Wallpaper is { } custom && File.Exists(custom) ? custom : CurrentTheme.WallpaperPath;
+        var path = _settings.WallpaperMode switch
+        {
+            "custom" => _settings.Wallpaper is { } custom && File.Exists(custom) ? custom : null,
+            "none" => null,
+            _ => CurrentTheme.WallpaperPath
+        };
         if (path is not null) ShellState.SetWallpaper(path);
         else ShellState.ResetWallpaper();
     }

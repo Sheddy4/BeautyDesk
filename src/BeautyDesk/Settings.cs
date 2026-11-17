@@ -25,8 +25,21 @@ internal sealed class Settings
     public string Theme { get; set; } = "retro";
     public string Language { get; set; } = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ru" ? "ru" : "en";
     public bool ShowDesktopIcons { get; set; }
-    /// <summary>Своя картинка вместо обоев темы; null — брать из темы.</summary>
+    /// <summary>
+    /// Откуда брать обои: theme — из темы, custom — своя картинка, none — не трогать обои Windows.
+    /// По умолчанию не трогаем: у человека могут быть свои обои, и менять их без спроса не стоит.
+    /// </summary>
+    public string WallpaperMode { get; set; } = "none";
+    /// <summary>Своя картинка для режима custom.</summary>
     public string? Wallpaper { get; set; }
+    /// <summary>Что показывать на верхней панели.</summary>
+    public bool ShowIsland { get; set; } = true;
+    public bool ShowTray { get; set; } = true;
+    public bool ShowLayout { get; set; } = true;
+    /// <summary>Корзина в доке.</summary>
+    public bool ShowTrash { get; set; } = true;
+    /// <summary>Показывать служебные утилиты Windows в общем списке лаунчера (поиском они находятся всегда).</summary>
+    public bool LauncherSystemApps { get; set; }
     /// <summary>Закреплённое в доке; null — ещё не настраивалось, при первом запуске заполнится само.</summary>
     public List<DockPin>? Dock { get; set; }
     /// <summary>Программы, закреплённые в верхней части лаунчера (их имена в папке «Приложения»).</summary>

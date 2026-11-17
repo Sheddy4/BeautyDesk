@@ -131,7 +131,8 @@ internal sealed class Dock
 
         var trashKey = _trashFull ? "trash:full" : "trash:empty";
         if (!_icons.ContainsKey(trashKey) && IconLoader.DataUrl(TrashShellName) is { } trashIcon) SetIcon(trashKey, trashIcon);
-        items.Add(new Item(TrashId, "trash", "", _icons.ContainsKey(trashKey) ? trashKey : null, false, false, false, []));
+        if (_settings.ShowTrash)
+            items.Add(new Item(TrashId, "trash", "", _icons.ContainsKey(trashKey) ? trashKey : null, false, false, false, []));
         return items;
     }
 

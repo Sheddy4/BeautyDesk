@@ -1,0 +1,11 @@
+{
+  "name": {
+    "ru": "Стекло (светлое)",
+    "en": "Glass (light)"
+  },
+  "barHeight": 28,
+  "dockHeight": 68,
+  "wallpaper": "wallpaper.jpg",
+  "backdrop": "blur",
+  "backdropTint": "#F2F2F7"
+}

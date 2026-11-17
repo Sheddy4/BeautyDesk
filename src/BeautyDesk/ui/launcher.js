@@ -6,6 +6,7 @@ if (BD.role === 'launcher') {
 
   let apps = [];
   let pinned = [];
+  let showSystem = false;
   let icons = {};
   let cells = [];        // ячейки в порядке обхода стрелками
   let selected = 0;
@@ -51,7 +52,7 @@ if (BD.role === 'launcher') {
   function render() {
     const query = search.value.trim().toLowerCase();
     // Служебные утилиты Windows в общем списке не показываются, но поиском находятся.
-    let found = apps.filter((a) => !a.system);
+    let found = apps.filter((a) => showSystem || !a.system);
     if (query) {
       found = apps.filter((a) => a.name.toLowerCase().includes(query));
       // Сначала программы, название которых начинается с набранного.
@@ -94,7 +95,7 @@ if (BD.role === 'launcher') {
     }
   });
 
-  BD.on('launcher', (data) => { apps = data.apps; pinned = data.pinned; render(); });
+  BD.on('launcher', (data) => { apps = data.apps; pinned = data.pinned; showSystem = Boolean(data.showSystem); render(); });
   BD.on('launcherIcons', (data) => {
     Object.assign(icons, data);
     for (const el of cells) {

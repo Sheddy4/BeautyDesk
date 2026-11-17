@@ -1,14 +1,45 @@
-/* Linux-райс: плотная тонкая панель, прямые углы, терминальная палитра. */
+/*
+  Linux-райс: плотная панель из отдельных «модулей», прямые углы, терминальный шрифт,
+  палитра в духе Catppuccin. Никакой прозрачности — как в тайловых оконных менеджерах.
+*/
 :root {
-  --bd-font: "Cascadia Code", Consolas, monospace;
+  --bd-font: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
   --bd-font-size: 12px;
   --bd-fg: #cdd6f4;
   --bd-muted: #7f849c;
   --bd-accent: #89b4fa;
+  --bd-danger: #f38ba8;
   --bd-surface: #1e1e2e;
-  --bd-border: 1px solid #313244;
-  --bd-radius: 0;
-  --bd-menu-bg: #1e1e2e;
+  --bd-border: 1px solid #45475a;
+  --bd-radius: 4px;
+  --bd-menu-bg: #181825;
   --bd-control-bg: #313244;
-  --bd-control-radius: 0;
+  --bd-control-radius: 3px;
+  --bd-island-bg: #11111b;
 }
+
+/* Панель: модули отдельными плашками, у каждого свой цвет. */
+#bar { border-bottom: 2px solid var(--bd-accent); }
+#bar .group { gap: 5px; }
+#active-app, #layout, #quick, #clock, #tray, #sys-button {
+  height: calc(100% - 8px);
+  padding: 0 9px;
+  background: #313244;
+  border-radius: 3px;
+}
+#active-app { display: inline-flex; align-items: center; color: #b4befe; }
+#sys-button { color: #f5c2e7; }
+#layout { display: inline-flex; align-items: center; color: #a6e3a1; }
+#quick { color: #94e2d5; }
+#clock { color: #f9e2af; }
+#tray { padding: 0 4px; }
+#tray[hidden] { display: none; }
+
+/* Док и виджеты: прямоугольные, с цветной полосой сверху. */
+#dock::before { border-top: 2px solid var(--bd-accent); }
+.widget { border-top: 2px solid var(--bd-accent); }
+.widget-clock { border-top-color: #f9e2af; }
+.widget-calendar { border-top-color: #f5c2e7; }
+.widget-weather { border-top-color: #94e2d5; }
+.widget-hardware, .widget-disks, .widget-network { border-top-color: #a6e3a1; }
+.calendar-day.today { border-radius: 3px; color: #11111b; }
