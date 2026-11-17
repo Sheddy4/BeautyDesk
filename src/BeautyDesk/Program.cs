@@ -5,6 +5,8 @@ namespace BeautyDesk;
 
 internal static class Program
 {
+    private const string SingleInstance = "BeautyDesk.SingleInstance", QuitSignal = "BeautyDesk.Quit";
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -15,7 +17,24 @@ internal static class Program
             return 0;
         }
 
-        using var single = new Mutex(true, "BeautyDesk.SingleInstance", out bool isFirst);
+        // «BeautyDesk.exe --quit» просит работающий экземпляр выйти как положено, с возвратом панели задач.
+        // Так его закрывают установщик и удаление программы: простое завершение процесса убило бы и сторожа.
+        if (args.Length == 1 && args[0] == "--quit")
+        {
+            if (EventWaitHandle.TryOpenExisting(QuitSignal, out var signal))
+            {
+                signal.Set();
+                signal.Dispose();
+                for (int i = 0; i < 50 && Mutex.TryOpenExisting(SingleInstance, out var running); i++)
+                {
+                    running.Dispose();
+                    Thread.Sleep(100);
+                }
+            }
+            return 0;
+        }
+
+        using var single = new Mutex(true, SingleInstance, out bool isFirst);
         if (!isFirst) return 0;
 
         ShellState.RestoreIfStale();
@@ -26,6 +45,14 @@ internal static class Program
 
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var host = new DesktopHost();
+
+        var quit = new EventWaitHandle(false, EventResetMode.AutoReset, QuitSignal);
+        new Thread(() =>
+        {
+            quit.WaitOne();
+            app.Dispatcher.BeginInvoke(host.Exit);
+        })
+        { IsBackground = true }.Start();
 
         // Ошибка в одном месте интерфейса не должна оставлять человека без панели и дока: записываем её
         // и работаем дальше. Но если ошибки сыплются подряд, что-то сломано всерьёз — тогда честно падаем,
