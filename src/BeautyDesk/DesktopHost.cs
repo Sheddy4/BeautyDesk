@@ -60,6 +60,7 @@ internal sealed class DesktopHost
     private TrayIcons? _tray;
     private ShellWindow? _menu;
     private readonly AppCatalog _apps = new();
+    private readonly Bridge _bridge = new();
     private WinKey? _winKey;
     private ShellWindow? _launcher;
     private ShellWindow? _settingsWindow;
@@ -127,6 +128,8 @@ internal sealed class DesktopHost
         _winKey = new WinKey();
         _winKey.Pressed += ToggleLauncher;
         _apps.Loaded += PublishLauncher;
+        _bridge.Received += OnBridge;
+        _bridge.ReadAll();
         _apps.Refresh();
 
         Native.RegisterHotKey(IntPtr.Zero, ExitHotKeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, VK_Q);
@@ -150,6 +153,7 @@ internal sealed class DesktopHost
         _launcher?.Close();
         _settingsWindow?.Close();
         _winKey?.Dispose();
+        _bridge.Dispose();
         _dockController?.Close();
         _hardwareTimer.Stop();
         _spectrum.Dispose();
@@ -354,7 +358,8 @@ internal sealed class DesktopHost
     private static ShellRole[] RolesFor(string topic) => topic switch
     {
         "media" => [ShellRole.Island, ShellRole.Desktop], // «остров» и виджет плеера
-        "audio" or "hw" or "net" or "disks" => [ShellRole.Desktop],
+        "audio" or "hw" or "net" or "disks" or "power" => [ShellRole.Desktop],
+        _ when topic.StartsWith("bridge:") => [ShellRole.Desktop],
         "launcher" => [ShellRole.Launcher],
         "settings" => [ShellRole.Settings],
         "dock" or "dockIcons" or "dockHold" => [ShellRole.Dock],
@@ -409,6 +414,7 @@ internal sealed class DesktopHost
             strings = Strings(_settings.Language),
             widgets = window.Role == ShellRole.Desktop ? WidgetsFor(window.Monitor) : null,
             editing = window.Role == ShellRole.Desktop && _editingWidgets,
+            userWidgets = window.Role == ShellRole.Desktop ? UserWidgetUrls() : null,
             showTray = _settings.ShowTray,
             showLayout = _settings.ShowLayout,
             // Виджеты замирают и под развёрнутым окном: их всё равно не видно, а перерисовка окна
@@ -516,12 +522,25 @@ internal sealed class DesktopHost
                 window.FocusKeyboard();
                 break;
 
+            case "bridgeSend" when Text(message, "name") is { } bridgeName && message.TryGetProperty("command", out var command):
+                _bridge.Send(bridgeName, command);
+                break;
+
+            case "powerMode" when Text(message, "mode") is { } powerMode:
+                if (!PowerMode.Set(powerMode)) Log.Write($"Режим питания «{powerMode}» не включился");
+                Publish("power", PowerMode.Read());
+                break;
+
+            case "openWidgetsFolder":
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{AppPaths.UserWidgets}\"") { UseShellExecute = false })?.Dispose();
+                break;
+
             case "widgetsEdit" when message.TryGetProperty("value", out var edit):
                 SetWidgetEditing(edit.ValueKind == JsonValueKind.True);
                 break;
 
             case "log":
-                Log.Write($"Ошибка на странице {window.Role}: {Text(message, "text")}");
+                Log.Write($"Страница {window.Role}: {Text(message, "text")}");
                 break;
 
             case "setting" when Text(message, "key") is { } settingKey && message.TryGetProperty("value", out var settingValue):
@@ -783,7 +802,7 @@ internal sealed class DesktopHost
 
         // Показатели железа, сети и дисков тоже опрашиваются, только пока их виджеты видно.
         _statsInUse = visible;
-        bool stats = running && (visible.Contains("hardware") || visible.Contains("network") || visible.Contains("disks"));
+        bool stats = running && (visible.Contains("hardware") || visible.Contains("network") || visible.Contains("disks") || visible.Contains("power"));
         if (stats && !_hardwareTimer.IsEnabled)
         {
             _statsTick = 0;
@@ -797,6 +816,7 @@ internal sealed class DesktopHost
     private void PublishStats()
     {
         if (_statsInUse.Contains("hardware")) Publish("hw", _hardware.Read());
+        if (_statsInUse.Contains("power") && _statsTick % 2 == 0) Publish("power", PowerMode.Read());
         if (_statsInUse.Contains("network")) Publish("net", _hardware.ReadNetwork());
         // Место на дисках меняется медленно — раз в полминуты достаточно.
         if (_statsInUse.Contains("disks") && _statsTick % 20 == 0) Publish("disks", HardwareInfo.ReadDisks());
@@ -823,6 +843,31 @@ internal sealed class DesktopHost
         foreach (var w in _windows.Where(w => w.Role != ShellRole.Desktop && w.IsVisible)) w.Raise();
         UpdateWidgetServices();
         Broadcast();
+    }
+
+    // ---------- канал данных и сторонние виджеты ----------
+
+    private void OnBridge(string name, JsonElement value, double age)
+    {
+        // Время обновления передаётся как метка, а не как «возраст»: виджет сам видит, что данные устарели.
+        long updatedAt = DateTimeOffset.UtcNow.AddSeconds(-age).ToUnixTimeMilliseconds();
+        Publish("bridge:" + name, new { value, updatedAt });
+    }
+
+    /// <summary>Адреса сторонних виджетов: *.js прямо в папке или widget.js в подпапке.</summary>
+    private static List<string> UserWidgetUrls()
+    {
+        var urls = new List<string>();
+        try
+        {
+            foreach (var file in Directory.GetFiles(AppPaths.UserWidgets, "*.js").Order())
+                urls.Add($"https://{ShellWindow.UserWidgetsHost}/{Uri.EscapeDataString(Path.GetFileName(file))}");
+            foreach (var dir in Directory.GetDirectories(AppPaths.UserWidgets).Order())
+                if (File.Exists(Path.Combine(dir, "widget.js")))
+                    urls.Add($"https://{ShellWindow.UserWidgetsHost}/{Uri.EscapeDataString(Path.GetFileName(dir))}/widget.js");
+        }
+        catch (IOException e) { Log.Write($"Папка сторонних виджетов не прочитана: {e.Message}"); }
+        return urls;
     }
 
     // ---------- лаунчер ----------

@@ -19,6 +19,7 @@ internal enum ShellRole { Bar, Dock, Island, Menu, Launcher, Desktop, Settings }
 /// </summary>
 internal sealed class ShellWindow : Window
 {
+    public const string UserWidgetsHost = "userwidgets.beautydesk.example";
     private static readonly uint AppBarCallback = Native.RegisterWindowMessage("BeautyDesk.AppBar");
     private static readonly uint TaskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
 
@@ -104,6 +105,7 @@ internal sealed class ShellWindow : Window
         // Папки тем открыты для страницы оболочки: без этого WebView2 не отдаёт ей стили и шрифты с другого адреса.
         core.SetVirtualHostNameToFolderMapping(Theme.BuiltInHost, AppPaths.BuiltInThemes, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping(Theme.UserHost, AppPaths.UserThemes, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping(UserWidgetsHost, AppPaths.UserWidgets, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += (_, e) =>
         {
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);

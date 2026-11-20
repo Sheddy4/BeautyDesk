@@ -89,5 +89,18 @@
   "settings.systemApps": "Служебные программы Windows в лаунчере",
   "settings.systemApps.hint": "Поиском они находятся в любом случае.",
   "widgets.resize": "Сменить размер",
-  "widgets.remove": "Убрать"
+  "widgets.remove": "Убрать",
+  "widget.power": "Питание",
+  "widget.power.efficiency": "Экономия",
+  "widget.power.balanced": "Баланс",
+  "widget.power.performance": "Мощность",
+  "widget.power.limit": "Порог",
+  "widget.power.rpm": "об/мин",
+  "widget.power.charging": "заряжается",
+  "widget.power.plugged": "от сети",
+  "widget.power.unavailable": "Режим питания недоступен в текущей схеме",
+  "settings.widgets": "Виджеты",
+  "settings.userWidgets": "Сторонние виджеты",
+  "settings.userWidgets.open": "Открыть папку",
+  "settings.userWidgets.hint": "Положите туда .js-файл виджета и перезапустите BeautyDesk."
 }

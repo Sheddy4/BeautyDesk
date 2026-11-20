@@ -89,5 +89,18 @@
   "settings.systemApps": "Windows system tools in the launcher",
   "settings.systemApps.hint": "Search finds them either way.",
   "widgets.resize": "Change size",
-  "widgets.remove": "Remove"
+  "widgets.remove": "Remove",
+  "widget.power": "Power",
+  "widget.power.efficiency": "Efficiency",
+  "widget.power.balanced": "Balanced",
+  "widget.power.performance": "Performance",
+  "widget.power.limit": "Limit",
+  "widget.power.rpm": "rpm",
+  "widget.power.charging": "charging",
+  "widget.power.plugged": "plugged in",
+  "widget.power.unavailable": "Power mode is not available with the current plan",
+  "settings.widgets": "Widgets",
+  "settings.userWidgets": "Third-party widgets",
+  "settings.userWidgets.open": "Open folder",
+  "settings.userWidgets.hint": "Put a widget's .js file there and restart BeautyDesk."
 }

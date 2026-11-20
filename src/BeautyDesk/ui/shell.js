@@ -13,6 +13,18 @@ const BD = {
   /** Подписка: 'state' — тема и язык, остальные названия — темы данных от программы (sys, tray, media, menu). */
   on(type, handler) { (BD.handlers[type] ??= []).push(handler); },
 
+  /** Вызывает подписчиков сама страница (не программа) — например, когда подгрузились сторонние виджеты. */
+  emit(type, data) { for (const handler of BD.handlers[type] ?? []) handler(data); },
+
+  /**
+   * Канал данных от сторонней программы (см. Services/Bridge.cs): обработчик получает { value, updatedAt },
+   * где updatedAt — когда программа последний раз обновила данные (мс, как Date.now()).
+   */
+  bridge(name, handler) { BD.on(`bridge:${name}`, handler); },
+
+  /** Команда сторонней программе по каналу данных. */
+  bridgeSend(name, command) { BD.send({ type: 'bridgeSend', name, command }); },
+
   /** Отписка — для виджетов, которые убирают со стола. */
   off(type, handler) { BD.handlers[type] = (BD.handlers[type] ?? []).filter((h) => h !== handler); },
 
@@ -82,7 +94,22 @@ window.addEventListener('unhandledrejection', (event) => BD.send({ type: 'log', 
 // Окна оболочки — не веб-страница: собственное меню по правой кнопке им не нужно.
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
+// Сторонние виджеты из папки пользователя: подключаются один раз, после встроенных.
+const loadedUserWidgets = new Set();
+function loadUserWidgets(urls) {
+  for (const url of urls ?? []) {
+    if (loadedUserWidgets.has(url)) continue;
+    loadedUserWidgets.add(url);
+    const script = document.createElement('script');
+    script.src = url;
+    script.onload = () => BD.emit('widgetTypesChanged');
+    script.onerror = () => BD.send({ type: 'log', text: `Сторонний виджет не загрузился: ${url}` });
+    document.body.appendChild(script);
+  }
+}
+
 function applyState() {
+  if (BD.role === 'desktop') loadUserWidgets(BD.state.userWidgets);
   const state = BD.state;
   document.documentElement.lang = state.language;
   document.documentElement.dataset.theme = state.theme.id;

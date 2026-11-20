@@ -53,6 +53,14 @@ if (BD.role === 'settings') {
     return group;
   }
 
+  function button(labelKey, onClick) {
+    const b = document.createElement('button');
+    b.className = 'settings-button';
+    b.textContent = BD.t(labelKey);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
   function render() {
     if (!data) return;
     document.getElementById('settings-title').textContent = BD.t('settings.title');
@@ -85,6 +93,8 @@ if (BD.role === 'settings') {
         row('settings.showIsland', toggle('showIsland')),
         row('settings.showTray', toggle('showTray')),
         row('settings.showLayout', toggle('showLayout'))),
+      section('settings.widgets',
+        row('settings.userWidgets', button('settings.userWidgets.open', () => BD.send({ type: 'openWidgetsFolder' })), 'settings.userWidgets.hint')),
       section('settings.dockLauncher',
         row('settings.showTrash', toggle('showTrash')),
         row('settings.systemApps', toggle('launcherSystemApps'), 'settings.systemApps.hint')),

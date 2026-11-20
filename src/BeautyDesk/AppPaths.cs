@@ -16,6 +16,8 @@ internal static class AppPaths
     public static readonly string Ui = Path.Combine(AppContext.BaseDirectory, "ui");
     public static readonly string BuiltInThemes = Path.Combine(AppContext.BaseDirectory, "themes");
     public static readonly string UserThemes = Ensure(Path.Combine(Roaming, "themes"));
+    /// <summary>Сторонние виджеты: *.js или папка с widget.js. Подгружаются на рабочий стол сами.</summary>
+    public static readonly string UserWidgets = Ensure(Path.Combine(Roaming, "widgets"));
     public static readonly string Settings = Path.Combine(Roaming, "settings.json");
     public static readonly string RestoreState = Path.Combine(Local, "restore.json");
     public static readonly string WebViewData = Path.Combine(Local, "WebView2");
