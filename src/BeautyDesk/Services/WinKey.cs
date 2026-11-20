@@ -98,6 +98,26 @@ internal sealed class WinKey : IDisposable
         return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
     }
 
+    public const ushort VK_CONTROL = 0x11, VK_TAB = 0x09, VK_D = 0x44, VK_LEFT = 0x25, VK_RIGHT = 0x27, VK_WIN = 0x5B;
+
+    /// <summary>
+    /// Нажимает сочетание клавиш (например, Win+D) от имени программы. Нажатия помечены, поэтому
+    /// собственный перехват клавиши Win их не трогает и лаунчер не открывается.
+    /// </summary>
+    public static void SendCombo(params ushort[] keys)
+    {
+        var inputs = new INPUT[keys.Length * 2];
+        for (int i = 0; i < keys.Length; i++)
+        {
+            inputs[i].Type = INPUT_KEYBOARD;
+            inputs[i].Data.Keyboard = new KEYBDINPUT { Vk = keys[i], ExtraInfo = Marker };
+            int up = keys.Length * 2 - 1 - i;
+            inputs[up].Type = INPUT_KEYBOARD;
+            inputs[up].Data.Keyboard = new KEYBDINPUT { Vk = keys[i], Flags = KEYEVENTF_KEYUP, ExtraInfo = Marker };
+        }
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+    }
+
     private static void SendMaskKey()
     {
         var inputs = new INPUT[2];

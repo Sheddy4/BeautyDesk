@@ -61,6 +61,11 @@ internal sealed class DesktopHost
     private ShellWindow? _menu;
     private readonly AppCatalog _apps = new();
     private readonly Bridge _bridge = new();
+    private readonly AudioMixer _mixer = new();
+    private readonly ClipboardHistory _clipboard = new();
+    private readonly Currency _currency = new();
+    private readonly DispatcherTimer _hotCornerTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private const int HotCornerDelayMs = 300;
     private WinKey? _winKey;
     private ShellWindow? _launcher;
     private ShellWindow? _settingsWindow;
@@ -129,6 +134,11 @@ internal sealed class DesktopHost
         _winKey.Pressed += ToggleLauncher;
         _apps.Loaded += PublishLauncher;
         _bridge.Received += OnBridge;
+        _clipboard.Changed += () => Publish("clipboard", new { items = _clipboard.Items });
+        _mixer.DevicesChanged += () => Application.Current.Dispatcher.BeginInvoke(() => { if (_statsInUse.Contains("mixer")) PublishMixer(); });
+        _hotCornerTimer.Tick += (_, _) => CheckHotCorners();
+        UpdateHotCornerTimer();
+        PublishDesktops();
         _bridge.ReadAll();
         _apps.Refresh();
 
@@ -156,6 +166,9 @@ internal sealed class DesktopHost
         _bridge.Dispose();
         _dockController?.Close();
         _hardwareTimer.Stop();
+        _hotCornerTimer.Stop();
+        _clipboard.Dispose();
+        _mixer.Dispose();
         _spectrum.Dispose();
         _hardware.Dispose();
         _system.Dispose();
@@ -259,6 +272,7 @@ internal sealed class DesktopHost
     private void Tick()
     {
         ShellState.KeepHidden(!_settings.ShowDesktopIcons);
+        PublishDesktops();
         _system.Refresh();
         if (_tick++ % 6 == 0) _dock?.RefreshTrash();
         ReportPointer();
@@ -361,6 +375,8 @@ internal sealed class DesktopHost
         "audio" or "hw" or "net" or "disks" or "power" => [ShellRole.Desktop],
         _ when topic.StartsWith("bridge:") => [ShellRole.Desktop],
         "launcher" => [ShellRole.Launcher],
+        "mixer" or "clipboard" => [ShellRole.Desktop],
+        "desktops" => [ShellRole.Bar],
         "settings" => [ShellRole.Settings],
         "dock" or "dockIcons" or "dockHold" => [ShellRole.Dock],
         "menu" => [ShellRole.Menu],
@@ -529,6 +545,63 @@ internal sealed class DesktopHost
             case "powerMode" when Text(message, "mode") is { } powerMode:
                 if (!PowerMode.Set(powerMode)) Log.Write($"Режим питания «{powerMode}» не включился");
                 Publish("power", PowerMode.Read());
+                break;
+
+            case "mixerSet" when Text(message, "session") is { } session:
+                _mixer.SetAppVolume(session, Number(message, "volume"), message.TryGetProperty("mute", out var appMute) ? appMute.ValueKind == JsonValueKind.True : null);
+                PublishMixer();
+                break;
+
+            case "mixerMaster":
+                _mixer.SetMaster(Number(message, "volume"), message.TryGetProperty("mute", out var masterMute) ? masterMute.ValueKind == JsonValueKind.True : null);
+                PublishMixer();
+                break;
+
+            case "mixerDevice" when Text(message, "id") is { } deviceId:
+                _mixer.SetDefaultDevice(deviceId);
+                PublishMixer();
+                break;
+
+            case "clipboardCopy":
+                _clipboard.Copy(Number(message, "index"));
+                break;
+
+            case "clipboardClear":
+                _clipboard.Clear();
+                break;
+
+            case "copyText" when Text(message, "text") is { } copied:
+                ClipboardHistory.SetText(copied);
+                CloseLauncher(returnFocus: true);
+                break;
+
+            case "pickPath":
+                PickPath(window, Text(message, "kind"), Text(message, "requestId"));
+                break;
+
+            case "openLink" when Text(message, "target") is { } target:
+                Links.Open(target);
+                break;
+
+            case "photoList" when Text(message, "folder") is { } folder:
+                window.Post(JsonSerializer.Serialize(new { type = "photoList", data = new { requestId = Text(message, "requestId"), files = Photos.List(folder) } }, Json));
+                break;
+
+            case "photo" when Text(message, "path") is { } photoPath:
+            {
+                // Только картинки: страница не должна читать произвольные файлы.
+                string? url = Photos.List(Path.GetDirectoryName(photoPath) ?? "").Contains(photoPath, StringComparer.OrdinalIgnoreCase)
+                    ? Photos.Load(photoPath, Math.Clamp(Number(message, "width"), 200, 2400)) : null;
+                window.Post(JsonSerializer.Serialize(new { type = "photo", data = new { requestId = Text(message, "requestId"), url } }, Json));
+                break;
+            }
+
+            case "currency" when Text(message, "base") is { } baseCode:
+                _ = SendCurrencyAsync(window, baseCode, Text(message, "requestId"));
+                break;
+
+            case "switchDesktop":
+                _ = SwitchDesktopAsync(Number(message, "index"));
                 break;
 
             case "openWidgetsFolder":
@@ -799,10 +872,12 @@ internal sealed class DesktopHost
 
         // Эквалайзер — самое дорогое: слушает звук только пока плеер на столе действительно видно.
         _spectrum.SetActive(running && visible.Contains("player"));
+        // История буфера копится, пока виджет стоит на столе (даже под окнами); без виджета буфер не слушается.
+        _clipboard.SetActive(inUse.Contains("clipboard"));
 
         // Показатели железа, сети и дисков тоже опрашиваются, только пока их виджеты видно.
         _statsInUse = visible;
-        bool stats = running && (visible.Contains("hardware") || visible.Contains("network") || visible.Contains("disks") || visible.Contains("power"));
+        bool stats = running && new[] { "hardware", "meter", "network", "disks", "power", "mixer" }.Any(visible.Contains);
         if (stats && !_hardwareTimer.IsEnabled)
         {
             _statsTick = 0;
@@ -815,7 +890,8 @@ internal sealed class DesktopHost
     /// <summary>Показатели для виджетов «Монитор железа», «Сеть» и «Диски» — только для тех, что стоят на столе.</summary>
     private void PublishStats()
     {
-        if (_statsInUse.Contains("hardware")) Publish("hw", _hardware.Read());
+        if (_statsInUse.Contains("hardware") || _statsInUse.Contains("meter")) Publish("hw", _hardware.Read());
+        if (_statsInUse.Contains("mixer")) PublishMixer();
         if (_statsInUse.Contains("power") && _statsTick % 2 == 0) Publish("power", PowerMode.Read());
         if (_statsInUse.Contains("network")) Publish("net", _hardware.ReadNetwork());
         // Место на дисках меняется медленно — раз в полминуты достаточно.
@@ -868,6 +944,135 @@ internal sealed class DesktopHost
         }
         catch (IOException e) { Log.Write($"Папка сторонних виджетов не прочитана: {e.Message}"); }
         return urls;
+    }
+
+    // ---------- микшер, буфер обмена, ярлыки, фото, валюты ----------
+
+    private readonly Dictionary<string, string?> _appIcons = [];
+
+    private void PublishMixer()
+    {
+        var mixer = _mixer.Read();
+        Publish("mixer", new
+        {
+            devices = mixer.Devices,
+            master = mixer.Master,
+            masterMuted = mixer.MasterMuted,
+            apps = mixer.Apps.Select(a => new { a.Id, a.Name, a.Volume, a.Muted, a.Active, iconData = AppIcon(a.Icon) })
+        });
+    }
+
+    private string? AppIcon(string? path)
+    {
+        if (path is null) return null;
+        if (!_appIcons.TryGetValue(path, out var icon)) _appIcons[path] = icon = IconLoader.DataUrl(path, 48);
+        return icon;
+    }
+
+    /// <summary>
+    /// Диалог выбора папки или файла для виджета. Окно виджетов лежит под всеми окнами, поэтому
+    /// у диалога временный невидимый владелец поверх всех окон — иначе диалог открылся бы за ними.
+    /// </summary>
+    private void PickPath(ShellWindow window, string? kind, string? requestId)
+    {
+        var owner = new Window
+        {
+            WindowStyle = WindowStyle.None, ShowInTaskbar = false, Topmost = true, Width = 0, Height = 0,
+            AllowsTransparency = true, Background = System.Windows.Media.Brushes.Transparent
+        };
+        owner.Show();
+        owner.Activate();
+        string? path = null;
+        try
+        {
+            if (kind == "file")
+            {
+                var dialog = new OpenFileDialog { CheckFileExists = true };
+                if (dialog.ShowDialog(owner) == true) path = dialog.FileName;
+            }
+            else
+            {
+                var dialog = new OpenFolderDialog();
+                if (dialog.ShowDialog(owner) == true) path = dialog.FolderName;
+            }
+        }
+        finally { owner.Close(); }
+
+        string? name = path is null ? null : Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : path;
+        window.Post(JsonSerializer.Serialize(new { type = "picked", data = new { requestId, path, name, icon = path is null ? null : IconLoader.DataUrl(path, 64) } }, Json));
+    }
+
+    private async Task SendCurrencyAsync(ShellWindow window, string baseCode, string? requestId)
+    {
+        var rates = await _currency.GetAsync(baseCode);
+        window.Post(JsonSerializer.Serialize(new { type = "currency", data = new { requestId, @base = rates.Base, values = rates.Values, error = rates.Error, updatedAt = rates.UpdatedAt } }, Json));
+    }
+
+    // ---------- виртуальные рабочие столы и горячие углы ----------
+
+    private void PublishDesktops()
+    {
+        if (!_settings.ShowDesktops) { Publish("desktops", new { names = new[] { "" }, current = 0 }); return; }
+        Publish("desktops", Desktops.Read());
+    }
+
+    /// <summary>Переключение на стол с номером <paramref name="index"/> — штатными Ctrl+Win+стрелками.</summary>
+    private async Task SwitchDesktopAsync(int index)
+    {
+        var now = Desktops.Read();
+        int delta = Math.Clamp(index, 0, now.Names.Count - 1) - now.Current;
+        for (int i = 0; i < Math.Abs(delta); i++)
+        {
+            WinKey.SendCombo(WinKey.VK_CONTROL, WinKey.VK_WIN, delta > 0 ? WinKey.VK_RIGHT : WinKey.VK_LEFT);
+            await Task.Delay(150); // Windows анимирует каждый переход — даём ему закончиться
+        }
+        PublishDesktops();
+    }
+
+    private string? _cornerHere;
+    private long _cornerSince;
+    private bool _cornerFired;
+
+    /// <summary>Раз в 100 мс: если курсор задержался в углу экрана, выполняется действие этого угла.</summary>
+    private void CheckHotCorners()
+    {
+        if (_settings.HotCorners.Values.All(a => a is null or "none")) { _hotCornerTimer.Stop(); return; }
+        Native.GetCursorPos(out var p);
+        string? corner = null;
+        foreach (var monitor in _windows.Select(w => w.Monitor).Distinct())
+        {
+            var b = monitor.Bounds;
+            const int zone = 2;
+            bool left = p.X <= b.Left + zone - 1 && p.X >= b.Left, right = p.X >= b.Right - zone && p.X < b.Right;
+            bool top = p.Y <= b.Top + zone - 1 && p.Y >= b.Top, bottom = p.Y >= b.Bottom - zone && p.Y < b.Bottom;
+            corner = top && left ? "topLeft" : top && right ? "topRight" : bottom && left ? "bottomLeft" : bottom && right ? "bottomRight" : null;
+            if (corner is not null) break;
+        }
+        if (corner != _cornerHere)
+        {
+            _cornerHere = corner;
+            _cornerSince = Environment.TickCount64;
+            _cornerFired = false;
+            return;
+        }
+        // Задержка, чтобы угол не срабатывал, когда курсор просто проезжает мимо.
+        if (corner is null || _cornerFired || Environment.TickCount64 - _cornerSince < HotCornerDelayMs) return;
+        _cornerFired = true;
+        if (_fullscreenMonitor != IntPtr.Zero) return; // в игре углы не мешают
+        switch (_settings.HotCorners.GetValueOrDefault(corner))
+        {
+            case "desktop": WinKey.SendCombo(WinKey.VK_WIN, WinKey.VK_D); break;
+            case "taskview": WinKey.SendCombo(WinKey.VK_WIN, WinKey.VK_TAB); break;
+            case "launcher": ToggleLauncher(); break;
+            case "lock": Native.LockWorkStation(); break;
+            case "widgets": SetWidgetEditing(!_editingWidgets); break;
+        }
+    }
+
+    private void UpdateHotCornerTimer()
+    {
+        if (_settings.HotCorners.Values.Any(a => a is not (null or "none"))) _hotCornerTimer.Start();
+        else _hotCornerTimer.Stop();
     }
 
     // ---------- лаунчер ----------
@@ -966,6 +1171,8 @@ internal sealed class DesktopHost
         showTray = _settings.ShowTray,
         showLayout = _settings.ShowLayout,
         showTrash = _settings.ShowTrash,
+        showDesktops = _settings.ShowDesktops,
+        hotCorners = _settings.HotCorners,
         launcherSystemApps = _settings.LauncherSystemApps,
         version = typeof(DesktopHost).Assembly.GetName().Version?.ToString(3) ?? ""
     });
@@ -993,6 +1200,11 @@ internal sealed class DesktopHost
             case "showLayout": _settings.ShowLayout = flag; Broadcast(); break;
             case "showTrash": _settings.ShowTrash = flag; PublishDock(); break;
             case "launcherSystemApps": _settings.LauncherSystemApps = flag; PublishLauncher(); break;
+            case "showDesktops": _settings.ShowDesktops = flag; PublishDesktops(); break;
+            case var corner when corner.StartsWith("corner.") && text is "none" or "desktop" or "taskview" or "launcher" or "lock" or "widgets":
+                _settings.HotCorners[corner["corner.".Length..]] = text!;
+                UpdateHotCornerTimer();
+                break;
             default: return;
         }
         _settings.Save();

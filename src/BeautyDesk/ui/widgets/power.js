@@ -12,8 +12,6 @@
   const BLADE = 'M12 12C10.1 9.4 10.1 4.6 12.6 2.9c2.6-.6 3.6 3.2 2.3 5.9-.6 1.3-1.5 2.4-2.9 3.2z';
   const FAN = `<svg viewBox="0 0 24 24"><g fill="currentColor"><path d="${BLADE}"/><path d="${BLADE}" transform="rotate(120 12 12)"/>`
     + `<path d="${BLADE}" transform="rotate(240 12 12)"/><circle cx="12" cy="12" r="2.4"/></g></svg>`;
-  // Скорость вращения значка по режиму: чем мощнее, тем быстрее (секунд на треть оборота).
-  const SPIN = { efficiency: 2.6, balanced: 1.9, performance: 1.2 };
 
   BD.widget('power', {
     title: 'widget.power',
@@ -31,7 +29,6 @@
       const $ = (s) => body.querySelector(s);
       let power = null;
       let vendor = null;     // данные дополнения производителя
-      let lastSpin = '';
 
       const chip = (label, active, onClick) => {
         const b = document.createElement('button');
@@ -91,12 +88,10 @@
           battery.innerHTML = `<b>${power.battery}%</b><span class="muted">${power.charging ? BD.t('widget.power.charging') : power.plugged ? BD.t('widget.power.plugged') : left}</span>`;
         } else battery.textContent = '';
 
-        // Значок вентилятора крутится шагами (несколько кадров в секунду): плавное вращение
-        // в окне во весь экран заметно грузит процессор. Скорость — по мощности режима.
-        const mode = vendorMode ? (['efficiency', 'balanced', 'performance'][Math.min(2, v.modes.indexOf(vendorMode))] ?? 'balanced') : power?.mode;
-        const third = SPIN[mode] ?? 2;
-        const spin = power && !power.plugged && !vendorMode ? 'none' : `power-spin ${third}s steps(${Math.round(third * 5)}) infinite`;
-        if (spin !== lastSpin) { lastSpin = spin; $('.power-fan svg').style.animation = spin; }
+        // Значок вентилятора не крутится: любая непрерывная анимация в окне виджетов перерисовывает весь экран
+        // (вращение даже шагами по 5 кадров в секунду стоило около 10 % одного ядра). Режим видно по цвету значка.
+        const mode = vendorMode ? (['efficiency', 'balanced', 'performance'][Math.min(2, Math.round(v.modes.indexOf(vendorMode) * 2 / Math.max(1, v.modes.length - 1)))] ?? 'balanced') : power?.mode;
+        body.dataset.mode = mode ?? '';
         body.classList.toggle('has-vendor', Boolean(v));
       }
 

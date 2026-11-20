@@ -99,6 +99,21 @@ if (BD.role === 'bar') {
   // Колесо мыши над индикаторами меняет громкость.
   $('quick').addEventListener('wheel', (event) => BD.send({ type: 'volumeStep', delta: event.deltaY < 0 ? 2 : -2 }), { passive: true });
 
+  // Точки виртуальных рабочих столов: видны, когда столов больше одного; клик — переход.
+  BD.on('desktops', (data) => {
+    const box = $('desktops');
+    box.replaceChildren();
+    box.hidden = data.names.length < 2;
+    data.names.forEach((name, index) => {
+      const dot = document.createElement('button');
+      dot.className = 'desktop-dot';
+      dot.classList.toggle('current', index === data.current);
+      dot.title = name || `${BD.t('bar.desktopN')} ${index + 1}`;
+      dot.addEventListener('click', () => BD.send({ type: 'switchDesktop', index }));
+      box.appendChild(dot);
+    });
+  });
+
   BD.on('sys', (data) => { sys = data; renderSys(); });
   BD.on('tray', renderTray);
   BD.on('state', (state) => {

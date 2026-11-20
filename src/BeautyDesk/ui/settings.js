@@ -53,6 +53,21 @@ if (BD.role === 'settings') {
     return group;
   }
 
+  /** Выпадающий список. */
+  function select(key, options) {
+    const el = document.createElement('select');
+    el.className = 'settings-select';
+    for (const option of options) {
+      const o = document.createElement('option');
+      o.value = option.value;
+      o.textContent = option.label;
+      o.selected = option.value === key.value;
+      el.appendChild(o);
+    }
+    el.addEventListener('change', () => set(key.name, el.value));
+    return el;
+  }
+
   function button(labelKey, onClick) {
     const b = document.createElement('button');
     b.className = 'settings-button';
@@ -92,7 +107,11 @@ if (BD.role === 'settings') {
       section('settings.bar',
         row('settings.showIsland', toggle('showIsland')),
         row('settings.showTray', toggle('showTray')),
-        row('settings.showLayout', toggle('showLayout'))),
+        row('settings.showLayout', toggle('showLayout')),
+        row('settings.showDesktops', toggle('showDesktops'))),
+      section('settings.corners', ...['topLeft', 'topRight', 'bottomLeft', 'bottomRight'].map((corner) =>
+        row(`settings.corner.${corner}`, select({ name: `corner.${corner}`, value: data.hotCorners?.[corner] ?? 'none' },
+          ['none', 'desktop', 'taskview', 'launcher', 'lock', 'widgets'].map((a) => ({ value: a, label: BD.t(`settings.cornerAction.${a}`) })))))),
       section('settings.widgets',
         row('settings.userWidgets', button('settings.userWidgets.open', () => BD.send({ type: 'openWidgetsFolder' })), 'settings.userWidgets.hint')),
       section('settings.dockLauncher',

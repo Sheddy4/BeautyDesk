@@ -44,6 +44,13 @@ internal sealed class Settings
     public bool ShowTrash { get; set; } = true;
     /// <summary>Показывать служебные утилиты Windows в общем списке лаунчера (поиском они находятся всегда).</summary>
     public bool LauncherSystemApps { get; set; }
+    /// <summary>Точки виртуальных рабочих столов на верхней панели (видны, когда столов больше одного).</summary>
+    public bool ShowDesktops { get; set; } = true;
+    /// <summary>
+    /// Горячие углы: что делать, если задержать курсор в углу экрана.
+    /// Ключи topLeft, topRight, bottomLeft, bottomRight; действия none, desktop, taskview, launcher, lock, widgets.
+    /// </summary>
+    public Dictionary<string, string> HotCorners { get; set; } = [];
     /// <summary>Закреплённое в доке; null — ещё не настраивалось, при первом запуске заполнится само.</summary>
     public List<DockPin>? Dock { get; set; }
     /// <summary>Программы, закреплённые в верхней части лаунчера (их имена в папке «Приложения»).</summary>

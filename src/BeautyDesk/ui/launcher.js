@@ -79,6 +79,71 @@ if (BD.role === 'launcher') {
   }
 
   search.addEventListener('input', render);
+  // ---------- калькулятор ----------
+  // Если в поиске набрано выражение, сверху показывается ответ; Enter копирует его в буфер обмена.
+  // Разбор свой, без eval: только числа, + - * / ^ %, скобки, sqrt и pi.
+  function calculate(text) {
+    const source = text.replace(/,/g, '.').replace(/[×х]/g, '*').replace(/÷/g, '/').replace(/\s+/g, '');
+    if (!/[\d)]/.test(source) || !/[-+*/^%(]|sqrt|pi/i.test(source)) return null;
+    let pos = 0;
+    const peek = () => source[pos];
+    const fail = () => { throw new Error('syntax'); };
+    function number() {
+      const match = /^\d*\.?\d+(e[-+]?\d+)?/i.exec(source.slice(pos));
+      if (!match) fail();
+      pos += match[0].length;
+      return parseFloat(match[0]);
+    }
+    function primary() {
+      if (peek() === '(') { pos++; const v = expression(); if (peek() !== ')') fail(); pos++; return v; }
+      if (peek() === '-') { pos++; return -primary(); }
+      if (peek() === '+') { pos++; return primary(); }
+      if (/^sqrt/i.test(source.slice(pos))) { pos += 4; return Math.sqrt(primary()); }
+      if (/^pi/i.test(source.slice(pos))) { pos += 2; return Math.PI; }
+      return number();
+    }
+    function power() {
+      let v = primary();
+      if (peek() === '%') { pos++; v /= 100; }
+      if (peek() === '^') { pos++; v = v ** power(); }
+      return v;
+    }
+    function term() {
+      let v = power();
+      while (peek() === '*' || peek() === '/') { const op = source[pos++]; const r = power(); v = op === '*' ? v * r : v / r; }
+      return v;
+    }
+    function expression() {
+      let v = term();
+      while (peek() === '+' || peek() === '-') { const op = source[pos++]; const r = term(); v = op === '+' ? v + r : v - r; }
+      return v;
+    }
+    try {
+      const value = expression();
+      return pos === source.length && Number.isFinite(value) ? value : null;
+    } catch { return null; }
+  }
+
+  const calcButton = $('launcher-calc');
+  let calcValue = null;
+  calcButton.addEventListener('click', () => { if (calcValue != null) BD.send({ type: 'copyText', text: calcValue }); });
+  function renderCalc() {
+    const value = calculate(search.value.trim());
+    const language = BD.state?.language ?? 'en';
+    // В буфер — с десятичным разделителем языка интерфейса и без пробелов между разрядами: так число вставится в Excel.
+    calcValue = value == null ? null : new Intl.NumberFormat(language, { maximumSignificantDigits: 12, useGrouping: false }).format(value);
+    calcButton.hidden = calcValue == null;
+    // Пока виден ответ, надпись «Ничего не найдено» не нужна.
+    $('launcher-empty').classList.toggle('calc-shown', calcValue != null);
+    if (calcValue != null) {
+      const shown = new Intl.NumberFormat(language, { maximumSignificantDigits: 12 }).format(value);
+      calcButton.innerHTML = `<span class="calc-result"></span><span class="muted calc-hint"></span>`;
+      calcButton.querySelector('.calc-result').textContent = `= ${shown}`;
+      calcButton.querySelector('.calc-hint').textContent = BD.t('launcher.calcHint');
+    }
+  }
+  search.addEventListener('input', renderCalc);
+
   document.addEventListener('keydown', (event) => {
     const moves = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: COLUMNS, ArrowUp: -COLUMNS };
     if (event.key in moves) {
@@ -87,7 +152,9 @@ if (BD.role === 'launcher') {
       event.preventDefault();
       select(selected + moves[event.key]);
     } else if (event.key === 'Enter') {
-      if (cells[selected]) BD.send({ type: 'launch', id: cells[selected].dataset.id });
+      // Есть ответ калькулятора — Enter копирует его; иначе запускает выбранную программу.
+      if (calcValue != null) BD.send({ type: 'copyText', text: calcValue });
+      else if (cells[selected]) BD.send({ type: 'launch', id: cells[selected].dataset.id });
     } else if (event.key === 'Escape') {
       BD.send({ type: 'launcherClose' });
     } else if (document.activeElement !== search) {
@@ -106,6 +173,7 @@ if (BD.role === 'launcher') {
   BD.on('launcherOpen', () => {
     search.value = '';
     render();
+    renderCalc();
     $('launcher-scroll').scrollTop = 0;
     search.focus();
   });

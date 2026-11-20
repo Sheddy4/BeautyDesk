@@ -25,6 +25,23 @@ const BD = {
   /** Команда сторонней программе по каналу данных. */
   bridgeSend(name, command) { BD.send({ type: 'bridgeSend', name, command }); },
 
+  /**
+   * Запрос к программе с ответом: программа присылает сообщение answerType с тем же requestId.
+   * Например: await BD.request('pickPath', { kind: 'folder' }, 'picked').
+   */
+  request(type, payload, answerType) {
+    const requestId = `${type}-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+    return new Promise((resolve) => {
+      const handler = (data) => {
+        if (data?.requestId !== requestId) return;
+        BD.off(answerType, handler);
+        resolve(data);
+      };
+      BD.on(answerType, handler);
+      BD.send({ type, requestId, ...payload });
+    });
+  },
+
   /** Отписка — для виджетов, которые убирают со стола. */
   off(type, handler) { BD.handlers[type] = (BD.handlers[type] ?? []).filter((h) => h !== handler); },
 
