@@ -11,8 +11,12 @@ internal sealed class WidgetPlacement
 {
     public string Id { get; set; } = "";
     public string Type { get; set; } = "";
+    /// <summary>Место в клетках — так хранили версии до 0.5; новые раскладки хранят Left/Top.</summary>
     public int X { get; set; }
     public int Y { get; set; }
+    /// <summary>Место на экране в px страницы (без учёта масштаба); null — взять из X/Y.</summary>
+    public double? Left { get; set; }
+    public double? Top { get; set; }
     public int W { get; set; } = 2;
     public int H { get; set; } = 2;
     /// <summary>Собственные настройки виджета, например город для погоды.</summary>

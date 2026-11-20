@@ -1,38 +1,58 @@
-// Виджеты на рабочем столе: расстановка по сетке, режим редактирования, добавление и удаление.
-// Сами виджеты лежат в папке widgets/ и регистрируются через BD.widget(...).
+// Виджеты на рабочем столе: свободная расстановка, режим редактирования, добавление и удаление.
+// Сами виджеты регистрируются через BD.widget(...): встроенные лежат в папке widgets/,
+// сторонние — в папке пользователя (их подключает shell.js).
 if (BD.role === 'desktop') {
   const root = document.getElementById('desktop');
   const palette = document.getElementById('widget-palette');
+  const guideX = document.createElement('div');
+  const guideY = document.createElement('div');
+  guideX.className = 'widget-guide vertical';
+  guideY.className = 'widget-guide horizontal';
+  root.append(guideX, guideY);
 
-  // Сетка: клетка и промежуток в px страницы. Размеры виджетов задаются в клетках.
+  // Размеры виджетов задаются в «клетках» (так их описывают сами виджеты), а место — свободно, в px страницы.
   const CELL = 84, GAP = 12, MARGIN = 16;
-  const BOTTOM_RESERVE = 96; // место под док внизу экрана
+  const BOTTOM_RESERVE = 96;   // место под док внизу экрана
+  const SNAP = 8;              // на таком расстоянии виджет прилипает к краям соседей и экрана
+  const SPACING = GAP;         // при прилипании к соседу между ними остаётся такой зазор
 
-  let layout = [];              // [{ id, type, x, y, w, h, options }]
+  let layout = [];             // [{ id, type, w, h, left, top, options }]
   let editing = false;
-  let press = null;             // перетаскивание: { item, element, offsetX, offsetY, fromX, fromY }
+  let press = null;            // перетаскивание
   let lastClip = '';
-  const instances = new Map();  // id -> { element, body, type, api }
+  const instances = new Map(); // id -> { element, body, type, api }
 
-  const left = (cells) => MARGIN + cells * (CELL + GAP);
   const size = (cells) => cells * CELL + (cells - 1) * GAP;
-  const columns = () => Math.max(1, Math.floor((window.innerWidth - MARGIN * 2 + GAP) / (CELL + GAP)));
-  const rows = () => Math.max(1, Math.floor((window.innerHeight - MARGIN - BOTTOM_RESERVE + GAP) / (CELL + GAP)));
+  const cellLeft = (cells) => MARGIN + cells * (CELL + GAP);
+  const box = (i) => ({ left: i.left, top: i.top, right: i.left + size(i.w), bottom: i.top + size(i.h) });
+  const area = () => ({ left: MARGIN, top: MARGIN, right: window.innerWidth - MARGIN, bottom: window.innerHeight - BOTTOM_RESERVE });
 
-  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-  const fits = (item, except) =>
-    item.x >= 0 && item.y >= 0 && item.x + item.w <= columns() && item.y + item.h <= rows() &&
-    !layout.some((other) => other !== except && other.id !== item.id && overlaps(item, other));
+  const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  function fits(item) {
+    const b = box(item), screen = area();
+    if (b.left < screen.left - 0.5 || b.top < screen.top - 0.5 || b.right > screen.right + 0.5 || b.bottom > screen.bottom + 0.5) return false;
+    return !layout.some((other) => other.id !== item.id && overlaps(b, box(other)));
+  }
+
+  /** Раскладки из прошлых версий хранят место в клетках — переводим в px один раз. */
+  function normalize(item) {
+    const result = { ...item, options: item.options ?? {} };
+    if (result.left == null || result.top == null) {
+      result.left = cellLeft(result.x ?? 0);
+      result.top = cellLeft(result.y ?? 0);
+    }
+    return result;
+  }
 
   function save() {
-    BD.send({ type: 'widgetsSave', widgets: layout });
+    BD.send({ type: 'widgetsSave', widgets: layout.map(({ id, type, w, h, left, top, options }) => ({ id, type, w, h, left: Math.round(left), top: Math.round(top), options })) });
   }
 
   /** Окно под виджеты занимает весь рабочий стол; программе сообщается, где виджеты, остальное пропускает клики. */
   function updateClip() {
     const rects = editing
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
-      : layout.map((i) => ({ x: left(i.x), y: left(i.y), width: size(i.w), height: size(i.h) }));
+      : layout.map((i) => ({ x: i.left, y: i.top, width: size(i.w), height: size(i.h) }));
     const key = JSON.stringify(rects);
     if (key === lastClip) return;
     lastClip = key;
@@ -40,8 +60,7 @@ if (BD.role === 'desktop') {
   }
 
   function place(element, item) {
-    element.style.left = `${left(item.x)}px`;
-    element.style.top = `${left(item.y)}px`;
+    element.style.transform = `translate(${item.left}px, ${item.top}px)`;
     element.style.width = `${size(item.w)}px`;
     element.style.height = `${size(item.h)}px`;
     element.dataset.size = `${item.w}x${item.h}`;
@@ -51,7 +70,7 @@ if (BD.role === 'desktop') {
     const type = BD.widgetTypes[item.type];
     if (!type) return null;
     const element = document.createElement('div');
-    element.className = `widget widget-${item.type}`;
+    element.className = `widget widget-${item.type} entering`;
     const body = document.createElement('div');
     body.className = 'widget-body';
 
@@ -60,9 +79,11 @@ if (BD.role === 'desktop') {
     tools.className = 'widget-tools';
     const resize = document.createElement('button');
     resize.textContent = '⤢';
+    resize.title = BD.t('widgets.resize');
     resize.addEventListener('click', () => cycleSize(item.id));
     const remove = document.createElement('button');
     remove.textContent = '✕';
+    remove.title = BD.t('widgets.remove');
     remove.addEventListener('click', () => { layout = layout.filter((i) => i.id !== item.id); render(); save(); });
     tools.append(resize, remove);
     // У виджетов с собственными настройками (город для погоды) есть ещё кнопка с карандашом.
@@ -78,6 +99,8 @@ if (BD.role === 'desktop') {
     element.append(body, tools);
     element.addEventListener('pointerdown', (event) => startDrag(event, item.id));
     root.appendChild(element);
+    // Появление: виджет проявляется и чуть «вырастает» на месте.
+    requestAnimationFrame(() => requestAnimationFrame(() => element.classList.remove('entering')));
 
     const context = {
       id: item.id,
@@ -89,7 +112,15 @@ if (BD.role === 'desktop') {
         save();
       },
     };
-    return { element, body, type: item.type, api: type.create(body, context) ?? {} };
+    let api = {};
+    try {
+      api = type.create(body, context) ?? {};
+    } catch (error) {
+      // Сломанный сторонний виджет не должен ронять остальные.
+      body.textContent = `${type.title}: ${error.message}`;
+      BD.send({ type: 'log', text: `Виджет ${item.type} не создан: ${error.message}` });
+    }
+    return { element, body, type: item.type, api };
   }
 
   function render() {
@@ -103,23 +134,25 @@ if (BD.role === 'desktop') {
         instances.set(item.id, instance);
       }
       seen.add(item.id);
-      place(instance.element, item);
+      if (press?.item.id !== item.id) place(instance.element, item);
       instance.api.resize?.(item.w, item.h);
     }
     for (const id of [...instances.keys()]) if (!seen.has(id)) destroy(id);
 
     document.body.classList.toggle('editing', editing);
-    palette.hidden = !editing;
+    palette.classList.toggle('shown', editing);
     if (editing) renderPalette();
     updateClip();
   }
 
+  /** Исчезновение — коротко гаснет и уменьшается, потом удаляется. */
   function destroy(id) {
     const instance = instances.get(id);
     if (!instance) return;
-    instance.api.destroy?.();
-    instance.element.remove();
     instances.delete(id);
+    instance.api.destroy?.();
+    instance.element.classList.add('leaving');
+    setTimeout(() => instance.element.remove(), 200);
   }
 
   // ---------- редактирование ----------
@@ -139,15 +172,18 @@ if (BD.role === 'desktop') {
     palette.appendChild(done);
   }
 
-  /** Новый виджет встаёт на первое свободное место, если смотреть слева направо и сверху вниз. */
+  /** Новый виджет встаёт на первое свободное место, если смотреть сверху вниз и слева направо. */
   function add(typeName) {
     const [w, h] = BD.widgetTypes[typeName].sizes[0];
-    const item = { id: `${typeName}-${Date.now().toString(36)}`, type: typeName, x: 0, y: 0, w, h, options: {} };
-    for (item.y = 0; item.y + h <= rows(); item.y++) {
-      for (item.x = 0; item.x + w <= columns(); item.x++) {
+    const item = { id: `${typeName}-${Date.now().toString(36)}`, type: typeName, w, h, left: 0, top: 0, options: {} };
+    const screen = area(), step = (CELL + GAP) / 2;
+    for (let left = screen.left; left + size(w) <= screen.right; left += step) {
+      for (let top = screen.top; top + size(h) <= screen.bottom; top += step) {
+        Object.assign(item, { left, top });
         if (fits(item)) { layout.push(item); render(); save(); return; }
       }
     }
+    BD.send({ type: 'log', text: `Нет места для виджета ${typeName}` });
   }
 
   /** Следующий из размеров, предусмотренных виджетом, который помещается на этом месте. */
@@ -157,7 +193,7 @@ if (BD.role === 'desktop') {
     const current = sizes.findIndex(([w, h]) => w === item.w && h === item.h);
     for (let step = 1; step <= sizes.length; step++) {
       const [w, h] = sizes[(current + step) % sizes.length];
-      if (fits({ ...item, w, h }, item)) { item.w = w; item.h = h; render(); save(); return; }
+      if (fits({ ...item, w, h })) { item.w = w; item.h = h; render(); save(); return; }
     }
   }
 
@@ -165,31 +201,84 @@ if (BD.role === 'desktop') {
     if (!editing || event.button !== 0) return;
     const item = layout.find((i) => i.id === id);
     const element = instances.get(id).element;
-    const box = element.getBoundingClientRect();
-    press = { item, element, offsetX: event.clientX - box.left, offsetY: event.clientY - box.top, fromX: item.x, fromY: item.y };
+    press = {
+      item, element,
+      offsetX: event.clientX - item.left, offsetY: event.clientY - item.top,
+      valid: { left: item.left, top: item.top }, // последнее место, где виджет ни на кого не налезал
+      from: { left: item.left, top: item.top },
+    };
     element.classList.add('dragging');
     root.setPointerCapture(event.pointerId);
+  }
+
+  /**
+   * Прилипание: если край (или центр) виджета близко к краю соседа, краю экрана или центру экрана,
+   * он встаёт ровно туда, а на экране появляется направляющая. С зажатым Alt — без прилипания.
+   */
+  function snap(item, raw, free) {
+    const w = size(item.w), h = size(item.h), screen = area();
+    const result = { left: raw.left, top: raw.top, guideX: null, guideY: null };
+    if (free) return result;
+
+    const xs = [screen.left, screen.right - w, (window.innerWidth - w) / 2];
+    const ys = [screen.top, screen.bottom - h, (window.innerHeight - h) / 2];
+    const guidesX = [screen.left, screen.right, window.innerWidth / 2];
+    const guidesY = [screen.top, screen.bottom, window.innerHeight / 2];
+    for (const other of layout) {
+      if (other.id === item.id) continue;
+      const o = box(other);
+      // Встать вплотную (с зазором) слева/справа, сверху/снизу, или выровняться по тому же краю.
+      xs.push(o.right + SPACING, o.left - w - SPACING, o.left, o.right - w);
+      guidesX.push(o.right + SPACING, o.left - SPACING, o.left, o.right);
+      ys.push(o.bottom + SPACING, o.top - h - SPACING, o.top, o.bottom - h);
+      guidesY.push(o.bottom + SPACING, o.top - SPACING, o.top, o.bottom);
+    }
+    const nearest = (value, options) => options.reduce((best, option, index) =>
+      Math.abs(option - value) < Math.abs(best.value - value) ? { value: option, index } : best, { value: Infinity, index: -1 });
+
+    const nx = nearest(raw.left, xs);
+    if (Math.abs(nx.value - raw.left) <= SNAP) { result.left = nx.value; result.guideX = guidesX[nx.index]; }
+    const ny = nearest(raw.top, ys);
+    if (Math.abs(ny.value - raw.top) <= SNAP) { result.top = ny.value; result.guideY = guidesY[ny.index]; }
+    return result;
+  }
+
+  function showGuides(x, y) {
+    guideX.classList.toggle('shown', x != null);
+    guideY.classList.toggle('shown', y != null);
+    if (x != null) guideX.style.transform = `translateX(${x}px)`;
+    if (y != null) guideY.style.transform = `translateY(${y}px)`;
   }
 
   root.addEventListener('pointermove', (event) => {
     if (!press) return;
     const { item, element } = press;
-    // Виджет идёт за курсором по клеткам; на занятое место и за край он не встаёт.
-    const x = Math.round((event.clientX - press.offsetX - MARGIN) / (CELL + GAP));
-    const y = Math.round((event.clientY - press.offsetY - MARGIN) / (CELL + GAP));
-    if (fits({ ...item, x, y }, item)) {
-      item.x = x;
-      item.y = y;
-      place(element, item);
-    }
+    const screen = area();
+    const raw = {
+      left: Math.min(Math.max(event.clientX - press.offsetX, screen.left), screen.right - size(item.w)),
+      top: Math.min(Math.max(event.clientY - press.offsetY, screen.top), screen.bottom - size(item.h)),
+    };
+    const snapped = snap(item, raw, event.altKey);
+    item.left = snapped.left;
+    item.top = snapped.top;
+    place(element, item);
+    showGuides(snapped.guideX, snapped.guideY);
+    // Над чужим виджетом бросить нельзя: подсвечиваем и запоминаем последнее хорошее место.
+    const ok = fits(item);
+    element.classList.toggle('blocked', !ok);
+    if (ok) press.valid = { left: item.left, top: item.top };
   });
 
   function endDrag() {
     if (!press) return;
-    const moved = press.item.x !== press.fromX || press.item.y !== press.fromY;
-    press.element.classList.remove('dragging');
+    const { item, element, valid, from } = press;
     press = null;
-    if (moved) save();
+    showGuides(null, null);
+    element.classList.remove('dragging', 'blocked');
+    // Отпустили над другим виджетом — плавно возвращаемся на последнее свободное место.
+    if (!fits(item)) { item.left = valid.left; item.top = valid.top; }
+    place(element, item);
+    if (item.left !== from.left || item.top !== from.top) save();
   }
   root.addEventListener('pointerup', endDrag);
   root.addEventListener('pointercancel', endDrag);
@@ -200,13 +289,16 @@ if (BD.role === 'desktop') {
   BD.on('state', (state) => {
     editing = Boolean(state.editing);
     // Пока человек тащит виджет, присланная раскладка не должна сбивать то, что у него под рукой.
-    if (!press) layout = (state.widgets ?? []).map((i) => ({ ...i, options: i.options ?? {} }));
+    if (!press) layout = (state.widgets ?? []).map(normalize);
     render();
     for (const instance of instances.values()) instance.api.update?.();
   });
+  // Сторонние виджеты подгружаются позже встроенных — когда они зарегистрировались, дорисовываем.
+  BD.on('widgetTypesChanged', () => render());
   window.addEventListener('resize', () => { lastClip = ''; render(); });
 
-  // Раз в секунду виджеты, которым это нужно (часы), обновляют показания. При полноэкранном приложении — нет.
+  // Раз в секунду виджеты, которым это нужно (часы), обновляют показания.
+  // Пока рабочий стол закрыт окном или открыто полноэкранное приложение — нет.
   setInterval(() => {
     if (BD.state?.paused) return;
     for (const instance of instances.values()) instance.api.update?.();

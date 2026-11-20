@@ -202,6 +202,13 @@ if (BD.role === 'dock') {
       BD.send({ type: 'dock', action: 'reorder', id, ids: appElements().map((x) => x.dataset.id) });
       render(); // пока тянули, обновления состава откладывались
     } else if (isClick) {
+      // Программа ещё не запущена — иконка подпрыгивает, пока она открывается.
+      if (!element.classList.contains('running') && element.dataset.kind === 'app') {
+        element.classList.remove('launching');
+        void element.offsetWidth;
+        element.classList.add('launching');
+        setTimeout(() => element.classList.remove('launching'), 1300);
+      }
       BD.send({ type: 'dock', action: 'click', id });
     }
   }
@@ -222,6 +229,11 @@ if (BD.role === 'dock') {
       if (!el) {
         el = createElement(item);
         elements.set(item.id, el);
+        // Новая иконка (запустили программу) вырастает; при первом показе дока — без анимации.
+        if (elements.size > items.length - 1 && strip.childElementCount > 0) {
+          el.classList.add('appearing');
+          setTimeout(() => el.classList.remove('appearing'), 300);
+        }
       }
       if (item.kind !== 'separator') {
         el.classList.toggle('running', item.running);

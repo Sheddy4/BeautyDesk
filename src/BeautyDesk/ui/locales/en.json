@@ -87,5 +87,7 @@
   "settings.dockLauncher": "Dock and launcher",
   "settings.showTrash": "Recycle Bin in the Dock",
   "settings.systemApps": "Windows system tools in the launcher",
-  "settings.systemApps.hint": "Search finds them either way."
+  "settings.systemApps.hint": "Search finds them either way.",
+  "widgets.resize": "Change size",
+  "widgets.remove": "Remove"
 }

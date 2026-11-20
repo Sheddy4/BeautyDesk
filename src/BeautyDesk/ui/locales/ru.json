@@ -87,5 +87,7 @@
   "settings.dockLauncher": "Док и лаунчер",
   "settings.showTrash": "Корзина в доке",
   "settings.systemApps": "Служебные программы Windows в лаунчере",
-  "settings.systemApps.hint": "Поиском они находятся в любом случае."
+  "settings.systemApps.hint": "Поиском они находятся в любом случае.",
+  "widgets.resize": "Сменить размер",
+  "widgets.remove": "Убрать"
 }

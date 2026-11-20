@@ -411,7 +411,10 @@ internal sealed class DesktopHost
             editing = window.Role == ShellRole.Desktop && _editingWidgets,
             showTray = _settings.ShowTray,
             showLayout = _settings.ShowLayout,
+            // Виджеты замирают и под развёрнутым окном: их всё равно не видно, а перерисовка окна
+            // во весь экран заметно грузит процессор.
             paused = _fullscreenMonitor != IntPtr.Zero
+                     || (window.Role == ShellRole.Desktop && !_editingWidgets && _maximizedMonitors.Contains(window.Monitor.Handle))
         }, Json);
     }
 
@@ -664,6 +667,7 @@ internal sealed class DesktopHost
         _menu.Post(StateJson(_menu));
         _topics.Remove("menu"); // окно открывается заново — отправляем содержимое, даже если оно не изменилось
         Publish("menu", content);
+        _menu.Post("{\"type\":\"opened\"}");
         _menu.SetShown(true);
         _menu.Raise();
         WatchOutsideClicks(true);
@@ -769,11 +773,17 @@ internal sealed class DesktopHost
         var inUse = _windows.Where(w => w.Role == ShellRole.Desktop)
             .SelectMany(w => WidgetsFor(w.Monitor)).Select(w => w.Type).ToHashSet();
         bool running = _fullscreenMonitor == IntPtr.Zero;
+        // Виджеты, которые сейчас видно: на экранах, не закрытых развёрнутым окном.
+        // В режиме расстановки слой виджетов поднят поверх окон — тогда видно всё.
+        var visible = _windows.Where(w => w.Role == ShellRole.Desktop && (_editingWidgets || !_maximizedMonitors.Contains(w.Monitor.Handle)))
+            .SelectMany(w => WidgetsFor(w.Monitor)).Select(w => w.Type).ToHashSet();
 
-        _spectrum.SetActive(running && inUse.Contains("player"));
+        // Эквалайзер — самое дорогое: слушает звук только пока плеер на столе действительно видно.
+        _spectrum.SetActive(running && visible.Contains("player"));
 
-        _statsInUse = inUse;
-        bool stats = running && (inUse.Contains("hardware") || inUse.Contains("network") || inUse.Contains("disks"));
+        // Показатели железа, сети и дисков тоже опрашиваются, только пока их виджеты видно.
+        _statsInUse = visible;
+        bool stats = running && (visible.Contains("hardware") || visible.Contains("network") || visible.Contains("disks"));
         if (stats && !_hardwareTimer.IsEnabled)
         {
             _statsTick = 0;
@@ -811,6 +821,7 @@ internal sealed class DesktopHost
         foreach (var w in _windows.Where(w => w.Role == ShellRole.Desktop)) w.SetAboveWindows(editing);
         // Панель, док и «остров» остаются поверх затемнённого слоя виджетов.
         foreach (var w in _windows.Where(w => w.Role != ShellRole.Desktop && w.IsVisible)) w.Raise();
+        UpdateWidgetServices();
         Broadcast();
     }
 
@@ -836,6 +847,7 @@ internal sealed class DesktopHost
         _launcher.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
         _launcher.Post(StateJson(_launcher));
         _launcher.Post("{\"type\":\"launcherOpen\"}");
+        _launcher.Post("{\"type\":\"opened\"}");
         _launcherReturnTo = Native.GetForegroundWindow();
         _launcher.ShowFocused();
         WatchOutsideClicks(true);
@@ -891,6 +903,7 @@ internal sealed class DesktopHost
         _settingsWindow.SetBounds(new Native.RECT { Left = left, Top = top, Right = left + width, Bottom = top + height });
         _settingsWindow.Post(StateJson(_settingsWindow));
         PublishSettings();
+        _settingsWindow.Post("{\"type\":\"opened\"}");
         _settingsWindow.ShowFocused();
     }
 

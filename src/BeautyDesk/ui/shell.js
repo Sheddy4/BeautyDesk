@@ -53,7 +53,16 @@ const BD = {
    */
   widget(name, definition) { BD.widgetTypes[name] = definition; },
 
+  /** Окно только что показали: короткая анимация появления. */
+  appear() {
+    const root = document.documentElement;
+    root.classList.remove('appear');
+    void root.offsetWidth; // перезапуск анимации
+    root.classList.add('appear');
+  },
+
   start() {
+    BD.on('opened', () => BD.appear());
     chrome.webview.addEventListener('message', (event) => {
       const message = event.data;
       if (message?.type === 'state') {

@@ -250,26 +250,44 @@ html[data-role="desktop"] #desktop { position: absolute; inset: 0; display: bloc
 
 .widget {
   position: absolute;
+  left: 0;
+  top: 0;
   background: var(--bd-surface);
   border: var(--bd-border);
   border-radius: var(--bd-radius);
   overflow: hidden;
+  /* Место задаётся через transform: так перемещение и смена размера анимируются плавно и дёшево. */
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.22s ease, height 0.22s ease,
+              opacity 0.18s ease, scale 0.18s ease, box-shadow 0.18s ease;
 }
+.widget.entering, .widget.leaving { opacity: 0; scale: 0.94; }
+.widget.leaving { pointer-events: none; }
 .widget-body { height: 100%; padding: 14px; display: flex; flex-direction: column; justify-content: center; }
 
-/* Режим расстановки: слой затемняется, видна сетка, виджеты можно таскать. */
-body.editing #desktop {
-  background-color: rgba(0, 0, 0, 0.45);
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.22) 1px, transparent 1.5px);
-  background-size: 96px 96px;   /* клетка 84 + промежуток 12 */
-  background-position: 10px 10px;
-}
+/* Режим расстановки: слой затемняется, виджеты можно свободно таскать. */
+html[data-role="desktop"] #desktop { transition: background-color 0.2s ease; }
+body.editing #desktop { background-color: rgba(0, 0, 0, 0.45); }
 body.editing .widget { cursor: grab; outline: 1px dashed var(--bd-muted); outline-offset: 2px; }
-body.editing .widget.dragging { cursor: grabbing; opacity: 0.85; outline-color: var(--bd-accent); z-index: 2; }
 body.editing .widget-body { pointer-events: none; }
+/* Пока тянешь — виджет «приподнят» и идёт за курсором без задержки. */
+body.editing .widget.dragging {
+  cursor: grabbing;
+  z-index: 2;
+  scale: 1.03;
+  outline-color: var(--bd-accent);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  transition: scale 0.15s ease, box-shadow 0.15s ease;
+}
+body.editing .widget.blocked { outline: 2px solid var(--bd-danger); }
 
-.widget-tools { position: absolute; top: 6px; right: 6px; display: none; gap: 4px; }
-body.editing .widget-tools { display: flex; }
+/* Направляющие при прилипании к краям. */
+.widget-guide { position: absolute; left: 0; top: 0; display: none; background: var(--bd-accent); pointer-events: none; z-index: 3; }
+.widget-guide.shown { display: block; }
+.widget-guide.vertical { width: 1px; height: 100%; }
+.widget-guide.horizontal { width: 100%; height: 1px; }
+
+.widget-tools { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
+body.editing .widget-tools { opacity: 1; pointer-events: auto; }
 .widget-tools button {
   width: 24px;
   height: 24px;
@@ -277,22 +295,31 @@ body.editing .widget-tools { display: flex; }
   background: var(--bd-menu-bg);
   border: var(--bd-border);
   border-radius: 50%;
+  transition: background 0.12s ease;
 }
 .widget-tools button:hover { background: var(--bd-accent); }
 
-#widget-palette {
+#widget-palette { display: none; }
+html[data-role="desktop"] #widget-palette {
   position: absolute;
   left: 50%;
   bottom: 96px;
-  transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 64px);
   gap: 6px;
   padding: 8px;
   background: var(--bd-menu-bg);
   border: var(--bd-border);
   border-radius: var(--bd-radius);
+  opacity: 0;
+  transform: translate(-50%, 16px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-#widget-palette button { padding: 6px 12px; background: var(--bd-control-bg); border-radius: var(--bd-control-radius); white-space: nowrap; }
+html[data-role="desktop"] #widget-palette.shown { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+#widget-palette button { padding: 6px 12px; background: var(--bd-control-bg); border-radius: var(--bd-control-radius); white-space: nowrap; transition: background 0.12s ease; }
 #widget-palette button:hover { background: color-mix(in srgb, var(--bd-control-bg), var(--bd-fg) 14%); }
 #widget-palette button.primary { background: var(--bd-accent); color: #fff; }
 
@@ -574,3 +601,21 @@ html[data-role="bar"] .group { max-width: calc(50% - var(--bd-island-width, 260p
 html[data-role="bar"] .group > * { flex: none; }
 html[data-role="bar"] #tray { flex: 0 1 auto; min-width: 0; overflow: hidden; justify-content: flex-end; }
 html[data-role="bar"] #active-app { flex: 0 1 auto; }
+
+/* ---------- появление всплывающих окон ---------- */
+
+/* Меню, лаунчер и настройки появляются коротким «выплыванием», а не мгновенно. */
+@keyframes bd-appear { from { opacity: 0; transform: translateY(-6px) scale(0.98); } }
+@keyframes bd-appear-center { from { opacity: 0; transform: scale(0.96); } }
+html.appear[data-role="menu"] #menu { animation: bd-appear 0.16s cubic-bezier(0.2, 0.8, 0.2, 1); }
+html.appear[data-role="launcher"] #launcher, html.appear[data-role="settings"] #settings { animation: bd-appear-center 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* Пункты меню и ячейки лаунчера подсвечиваются плавно. */
+.menu-item, .launcher-app, .choice button, .settings-button { transition: background 0.12s ease, color 0.12s ease; }
+.switch::after { transition: left 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* Док: иконка запускаемой программы пару раз подпрыгивает, новые иконки вырастают. */
+@keyframes bd-bounce { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-14px); } 70% { transform: translateY(-4px); } }
+@keyframes bd-grow { from { opacity: 0; transform: scale(0.4); } }
+.dock-item.launching img { animation: bd-bounce 0.6s ease-in-out 2; }
+.dock-item.appearing img { animation: bd-grow 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.dock-item::after { transition: width 0.15s ease, margin-left 0.15s ease, opacity 0.2s ease, background 0.2s ease; }
